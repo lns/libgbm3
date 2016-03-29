@@ -118,7 +118,7 @@ public:
 	 */
 	inline void add_new_tree() {
 		_forest.push_back(Tree<FeaType>());
-		_forest[_forest.size()-1].grow(-1, Node<FeaType>());
+		_forest.back().grow(-1, Node<FeaType>());
 		_vec_ni.push_back(NodeIndex(_stats.size(), 0));
 		// todo: This can be further optimized,
 		// since only root's sum_g,h are updated.
@@ -140,7 +140,7 @@ public:
 	}
 
 	/**
-	 * Update _g, _h and _loss using _y, _f and _w
+	 * Update _g, _h and using _y, _f and _w
 	 */
 	inline void update_stats() {
 		if(_y.size()==0)
@@ -251,7 +251,7 @@ public:
 			if(ni[r]!=node_id)
 				continue;
 			accum += _stats[r];
-			if(last_entry->_val==this_entry->_val)
+			if(last_entry->_val <= this_entry->_val+_param.cut_thres)
 				continue;
 			if(accum._w < _param.min_node_weight)
 				continue;
@@ -404,5 +404,14 @@ public:
 		if(not tree.is_correct(cut.node_id))
 			qlog_warning("Checking failed.\n");
 	}
+
+	/**
+	 * Boost the forest
+	 */
+	inline void boost() {
+		if(_forest.empty())
+			;
+	}
+
 };
 
