@@ -1,7 +1,7 @@
 PROJ_ROOT=..
 
-CXX=clang++
-CXXFLAGS=-std=c++11 -O2 -Wall
+CXX=clang-omp++
+CXXFLAGS=-std=c++11 -O2 -Wall -fopenmp
 INCLUDES=-I${PROJ_ROOT}/src
 # Linux
 #LDFLAGS= -ldw
@@ -12,6 +12,9 @@ TARGETS=demo
 
 all: $(TARGETS)
 
-demo: demo.cpp ${PROJ_ROOT}/src/*
+demo: demo.s
 	$(CXX) $(CXXFLAGS) -o $@ $(INCLUDES) $< $(LDFLAGS)
+
+demo.s: demo.cpp ${PROJ_ROOT}/src/*
+	$(CXX) $(CXXFLAGS) -S -o $@ $(INCLUDES) $< $(LDFLAGS)
 

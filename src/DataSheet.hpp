@@ -17,11 +17,11 @@ template<typename FeaType>
 class DataSheet: public std::vector<std::unordered_map<FeaType, float> > {
 public:
 	// print info
-	void print(FILE * fo = stdout) const {
+	inline void print(FILE * fo = stdout) const {
 		fprintf(fo, "nrow: %ld\n", this->size());
 	}
 	// Read from libsvm format txt
-	void from_libsvm(const char * file_name, std::vector<float>& out_y);
+	inline void from_libsvm(const char * file_name, std::vector<float>& out_y);
 };
 
 template<typename FeaType>

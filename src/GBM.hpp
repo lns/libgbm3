@@ -19,13 +19,13 @@ public:
 	Stats() : _g(0.0f), _h(0.0f), _w(0.0f) {}
 
 	inline Stats& operator+=(const Stats& rhs) {
-		this->_g += rhs._g;
-		this->_h += rhs._h;
-		this->_w += rhs._w;
+		_g += rhs._g;
+		_h += rhs._h;
+		_w += rhs._w;
 		return *this;
 	}
 
-	friend Stats operator+(Stats lhs, const Stats& rhs)
+	inline friend Stats operator+(Stats lhs, const Stats& rhs)
 	{
 		lhs += rhs;
 		return lhs;
@@ -37,16 +37,30 @@ public:
 template<typename FeaType>
 class Cut {
 public:
+	int tree_id;
+	int node_id;
 	FeaType fea;
 	double cut; // cut val
 	double gain; // decreasing of regularized loss
 	double pred_L;
 	double pred_R;
 	bool miss_go_left;
-	Cut() : fea(), cut(0.0f), gain(0.0f), 
+
+	Cut() : tree_id(-1), node_id(-1), fea(), cut(0.0f), gain(0.0f), 
 		pred_L(0.0f), pred_R(0.0f), miss_go_left(false) {}
+
+	class Comp {
+	public:
+		inline bool operator()(const Cut& a, const Cut& b) {
+			return (a.gain > b.gain or (a.gain==b.gain 
+						and (a.tree_id < b.tree_id or (a.tree_id==b.tree_id
+								and a.node_id < b.node_id))));
+		}
+	};
+
 	void print() const {
-		printf("['%s'<%le] L:%le R:%le miss:%c gain:%le\n",qlib::to_string(fea).c_str(),
+		printf("Forest[%d][%d]: ['%s'<%le] L:%le R:%le miss:%c gain:%le\n",
+				tree_id, node_id, qlib::to_string(fea).c_str(),
 				cut, pred_L, pred_R, miss_go_left?'L':'R', gain);
 	}
 };
@@ -84,11 +98,12 @@ public:
 	 */
 	double _intercept;
 	Forest<FeaType> _forest;
+	std::vector<NodeIndex> _vec_ni;
 
 	GBM(const Parameters& param) : _param(param) {}
 
 	// Read data from libsvm format file
-	void read_data_from_libsvm(const char * file_name) {
+	inline void read_data_from_libsvm(const char * file_name) {
 		_ft.from_libsvm(file_name, _y);
 		_ft.sort();
 		_stats.resize(_y.size());
@@ -98,9 +113,24 @@ public:
 	}
 
 	/**
+	 * Add a new tree with root node.
+	 * And update tree sum_g,h and beta and f
+	 */
+	inline void add_new_tree() {
+		_forest.push_back(Tree<FeaType>());
+		_forest[_forest.size()-1].grow(-1, Node<FeaType>());
+		_vec_ni.push_back(NodeIndex(_stats.size(), 0));
+		// This can be further optimized,
+		// since only root's sum_g,h are updated.
+		if(update_tree_beta_and_f(_forest.size()-1))
+			qlog_warning("intercept is not converged. "
+					"Try a smllaer inner_thres and inner_precs.\n");
+	}
+
+	/**
 	 * Assign weights
 	 */
-	void assign_weights() {
+	inline void assign_weights() {
 		// At least two things can be done here:
 		// 1. Reweight positive samples to balance the labels
 		// 2. Set some weights to zero to do row sampling
@@ -112,7 +142,7 @@ public:
 	/**
 	 * Update _g, _h and _loss using _y, _f and _w
 	 */
-	void update_stats() {
+	inline void update_stats() {
 		if(_y.size()==0)
 			return;
 		_obj->FirstOrder(&_y[0], 1, &_f[0], 1, _y.size(),
@@ -129,7 +159,7 @@ public:
 	 * Get sum of stats, based on _stats._g and _h. 
 	 * should be called after update_stats().
 	 */
-	Stats sum_stats() const {
+	inline Stats sum_stats() const {
 		Stats res;
 		res._g = res._h = res._w = 0.0f;
 		for(auto&&s: _stats)
@@ -140,7 +170,7 @@ public:
 	/**
 	 * Get loss, based on _y and _f
 	 */
-	double loss() {
+	inline double loss() {
 		double res = 0;
 		_obj->Loss(&_y[0], 1, &_f[0], 1, _y.size(), &_loss[0], 1);
 		for(size_t i=0;i<_loss.size();++i)
@@ -148,26 +178,33 @@ public:
 		return res;
 	}
 
-	// update the intercept (one newton step), if according to _stats._g _h
-	// @return whether f is altered.
-	bool update_intercept_and_f() {
+	/**
+	 * update the intercept (one newton step), according to _stats._g _h
+	 * @return whether f is altered.
+	 */
+	inline bool update_intercept_and_f() {
 		Stats res;
 		res = sum_stats();
-		double diff = _param.eta * 
-			(argmin_reg_loss<double>(res._h, res._g, 0, 1e-6, _intercept));
-		qlog_warning("intercept diff:%le\n",diff);
+		double diff = (argmin_reg_loss<double>(res._h, res._g, 0, 1e-6, _intercept));
+		//qlog_warning("intercept diff:%le\n",diff);
 		if(fabs(diff)<_param.inner_precs*
 				std::max(_param.inner_thres,fabs(_intercept)))
 			return false;
+		diff *= _param.eta;
 		for(auto&f: _f)
 			f += diff;
 		_intercept += diff;
 		return true;
 	}
 
-	Cut<FeaType> find_best_fea(const Tree<FeaType>& tree, 
-			const NodeIndex& ni, int8_t node_id) const {
-		qlog_info("[%s] find_best_fea() for node:%d ...\n",qstrtime(),node_id);
+	/**
+	 * Find Best Feature to split
+	 */
+	Cut<FeaType> find_best_fea(int tree_id, int8_t node_id) const {
+		qlog_info("[%s] find_best_fea() for forest[%d][%d] ...\n",
+				qstrtime(),tree_id,node_id);
+		const Tree<FeaType>& tree = _forest[tree_id];
+		const NodeIndex& ni = _vec_ni[tree_id];
 		std::vector<FeaType> features;
 		features.reserve(_ft.size());
 		for(auto&&it: _ft)
@@ -181,12 +218,17 @@ public:
 		for(auto&&c: cuts)
 			if(c.gain > best.gain)
 				best = c;
-		qlog_info("[%s] best_fea found for node %d:\n",qstrtime(), node_id);
+		qlog_info("[%s] best_fea found:\n",qstrtime());
+		best.tree_id = tree_id;
+		best.node_id = node_id;
 		best.print();
 		return best;
 	}
 
-	Cut<FeaType> find_best_cut(const FeaType& fea, const Tree<FeaType>& tree,
+	/**
+	 * Find Best Cut for a feature
+	 */
+	inline Cut<FeaType> find_best_cut(const FeaType& fea, const Tree<FeaType>& tree,
 			const NodeIndex& ni, int8_t node_id) const {
 		Stats total;
 		total._g = tree[node_id]._sum_g;
@@ -202,6 +244,10 @@ public:
 		for(size_t i=1; i<n; last_entry=this_entry, i++) {
 			this_entry = &fea_vec[i];
 			auto r = last_entry->_row;
+			// TODO: This can be optimized so that if ni[r]!=current node_id
+			// the statistics can be accumulated to another candidates.
+			// This is especially useful when a node is split into two
+			// and we want to find best fea for these two nodes at the same time
 			if(ni[r]!=node_id)
 				continue;
 			accum += _stats[r];
@@ -232,7 +278,9 @@ public:
 	 * if loss can be decreased, update beta of each node, also update global f.
 	 * @return whether f is altered (which means beta is also altered)
 	 */
-	bool update_tree_beta_and_f(Tree<FeaType>& tree, const NodeIndex& ni) {
+	inline bool update_tree_beta_and_f(int tree_id) {
+		Tree<FeaType>& tree = _forest[tree_id];
+		const NodeIndex& ni = _vec_ni[tree_id];
 		for(auto&node: tree)
 			if(not node.is_empty()) {
 				node._sum_g = 0.0f;
@@ -265,14 +313,14 @@ public:
 			if(node.depth==0) // skip root
 				continue;
 			#endif
-			double diff = _param.eta * 
-				(argmin_reg_loss<double>(node._sum_h, node._sum_g,
+			double diff = (argmin_reg_loss<double>(node._sum_h, node._sum_g,
 												 _param.l2reg, _param.l1reg, node._beta));
 			if(fabs(diff)<_param.inner_precs*
 					std::max(_param.inner_thres,fabs(node._beta)))
 				continue;
-			//qlog_info("diff = %le\n",diff);
-			//node.dbginfo();
+			if(node._depth==0)
+				qlog_warning("Updating root as intercept is not converged.\n");
+			diff *= _param.eta;
 			for(size_t i=0;i<ni.size();i++)
 				if(ni[i]==node._self)
 					_f[i] += diff;
@@ -283,46 +331,75 @@ public:
 	}
 
 	/**
+	 * Refine weight (fully corrective update)
+	 * todo: Try to refine cut_val as well
+	 * @return number of iteration
+	 */
+	inline int refine(int max_iter) {
+		qlog_info("[%s] Refine: loss():%le\n",qstrtime(),loss());
+		update_stats();
+		int iter = 0;
+		for(; iter<max_iter; iter++) {
+			bool updated = false;
+			if(update_intercept_and_f()) {
+				update_stats();
+				updated = true;
+			}
+			//todo: random order of update?
+			for(size_t i=0;i<_forest.size();i++)
+				if(update_tree_beta_and_f(i)) {
+					update_stats();
+					updated = true;
+				}
+			if(not updated)
+				break;
+		}
+		qlog_info("[%s] Done refine[%d]: loss():%le\n",qstrtime(),iter,loss());
+		return iter;
+	}
+
+	/**
 	 * Split a node (usually a leaf) with Cut found
 	 */
-	void split(Tree<FeaType>& tree, int node_id, NodeIndex& ni,
-			const Cut<FeaType>& cut) const {
-		if(not tree[node_id].is_leaf()) {
+	inline void split(const Cut<FeaType>& cut) {
+		Tree<FeaType>& tree = _forest[cut.tree_id];
+		NodeIndex& ni = _vec_ni[cut.tree_id];
+		if(not tree[cut.node_id].is_leaf()) {
 			qlog_warning("Split a non-leaf node:\n");
-			tree[node_id].dbginfo();
+			tree[cut.node_id].dbginfo();
 			cut.print();
 		}
 		// 0. Check
-		if(this->_ft.find(cut.fea)==this->_ft.end())
+		if(_ft.find(cut.fea)==_ft.end())
 			qlog_error("Split with unknown feature: '%s'\n",
 					qlib::to_string(cut.fea).c_str());
 		// 1. Record cut info in current node
-		tree[node_id]._fea = cut.fea;
-		tree[node_id]._cut_val = cut.cut;
-		tree[node_id]._miss_go_left = cut.miss_go_left;
+		tree[cut.node_id]._fea = cut.fea;
+		tree[cut.node_id]._cut_val = cut.cut;
+		tree[cut.node_id]._miss_go_left = cut.miss_go_left;
 		Node<FeaType> L, R;
-		L._depth = R._depth = tree[node_id]._depth+1;
+		L._depth = R._depth = tree[cut.node_id]._depth+1;
 		// The predictions here won't be used. Normally they will be later updated by
 		// update_tree_beta_and_f(), whose value should be same.
 		L._beta = cut.pred_L;
 		R._beta = cut.pred_R;
 		// 2. Add to tree
-		tree[node_id]._left = tree.grow(node_id,L);
-		tree[node_id]._right = tree.grow(node_id,R);
+		tree[cut.node_id]._left = tree.grow(cut.node_id,L);
+		tree[cut.node_id]._right = tree.grow(cut.node_id,R);
 		// 3. Update nodeIndex
 		const std::vector<FTEntry>& fea_vec = _ft.find(cut.fea)->second;
 		for(auto&&entry : fea_vec) {
 			if(entry._val < cut.cut)
-				ni[entry._row] = tree[node_id]._left;
+				ni[entry._row] = tree[cut.node_id]._left;
 			else
-				ni[entry._row] = tree[node_id]._right;
+				ni[entry._row] = tree[cut.node_id]._right;
 		}
-		int miss = cut.miss_go_left?tree[node_id]._left:tree[node_id]._right;
+		int miss = cut.miss_go_left?tree[cut.node_id]._left:tree[cut.node_id]._right;
 		for(auto&x: ni)
-			if(x==node_id)
+			if(x==cut.node_id)
 				x = miss;
 		// 4. (Optional) Check
-		if(not tree.is_correct(node_id))
+		if(not tree.is_correct(cut.node_id))
 			qlog_warning("Checking failed.\n");
 	}
 };

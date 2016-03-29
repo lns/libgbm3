@@ -32,7 +32,7 @@ public:
 	};
 
 	// Sort the entries in ft
-	void sort() {
+	inline void sort() {
 		std::vector<std::vector<FTEntry>*> tasks;
 		for(auto& it: (*this))
 			tasks.push_back(&it.second);
@@ -44,7 +44,7 @@ public:
 	}
 
 	// Read from a DataSheet
-	void from_datasheet(const DataSheet<FeaType>& ds) {
+	inline void from_datasheet(const DataSheet<FeaType>& ds) {
 		this->clear();
 		qlog_info("[%s] Reading from datasheet ...\n",qstrtime());
 		for(size_t i=0; i<ds.size(); i++)
@@ -56,7 +56,7 @@ public:
 
 	// Read from a libsvm text file
 	template<typename T>
-	void from_libsvm(const char * file_name, std::vector<T>& out_y) {
+	inline void from_libsvm(const char * file_name, std::vector<T>& out_y) {
 		this->clear();
 		out_y.clear();
 		qlog_info("[%s] Reading from libsvm file '%s' ...\n",qstrtime(),file_name);
@@ -83,7 +83,7 @@ public:
 	}
 
 	// print info
-	void print() const {
+	inline void print() const {
 		qlog_info("size(): %lu\n", this->size());
 	}
 };

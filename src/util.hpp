@@ -48,15 +48,15 @@ inline T min_reg_loss(T a, T b, T l2reg, T l1reg, T x0) {
  * String to Any Type
  */
 template<typename F>
-F parse_cstr(const char * bgn, const char * end);
+inline F parse_cstr(const char * bgn, const char * end);
 
 template<>
-std::string parse_cstr(const char * bgn, const char * end) {
+inline std::string parse_cstr(const char * bgn, const char * end) {
 	return std::string(bgn,end);
 }
 
 template<>
-unsigned parse_cstr(const char * bgn, const char * end) {
+inline unsigned parse_cstr(const char * bgn, const char * end) {
 	const char * q;
 	unsigned ret = qstrtoul(bgn, &q);
 	if(q!=end)
@@ -65,7 +65,7 @@ unsigned parse_cstr(const char * bgn, const char * end) {
 }
 
 template<>
-unsigned long parse_cstr(const char * bgn, const char * end) {
+inline unsigned long parse_cstr(const char * bgn, const char * end) {
 	const char * q;
 	unsigned long ret = qstrtoul(bgn, &q);
 	if(q!=end)
