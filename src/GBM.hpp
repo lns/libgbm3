@@ -120,7 +120,7 @@ public:
 		_forest.push_back(Tree<FeaType>());
 		_forest[_forest.size()-1].grow(-1, Node<FeaType>());
 		_vec_ni.push_back(NodeIndex(_stats.size(), 0));
-		// This can be further optimized,
+		// todo: This can be further optimized,
 		// since only root's sum_g,h are updated.
 		if(update_tree_beta_and_f(_forest.size()-1))
 			qlog_warning("intercept is not converged. "
@@ -383,9 +383,11 @@ public:
 		// update_tree_beta_and_f(), whose value should be same.
 		L._beta = cut.pred_L;
 		R._beta = cut.pred_R;
-		// 2. Add to tree
-		tree[cut.node_id]._left = tree.grow(cut.node_id,L);
-		tree[cut.node_id]._right = tree.grow(cut.node_id,R);
+		// 2. Add to tree // We should not assign value while operate on the vector.
+		int L_node_id = tree.grow(cut.node_id,L);
+		tree[cut.node_id]._left = L_node_id;
+		int R_node_id = tree.grow(cut.node_id,R);
+		tree[cut.node_id]._right = R_node_id;
 		// 3. Update nodeIndex
 		const std::vector<FTEntry>& fea_vec = _ft.find(cut.fea)->second;
 		for(auto&&entry : fea_vec) {
@@ -394,7 +396,7 @@ public:
 			else
 				ni[entry._row] = tree[cut.node_id]._right;
 		}
-		int miss = cut.miss_go_left?tree[cut.node_id]._left:tree[cut.node_id]._right;
+		int miss = cut.miss_go_left? tree[cut.node_id]._left : tree[cut.node_id]._right;
 		for(auto&x: ni)
 			if(x==cut.node_id)
 				x = miss;
