@@ -28,16 +28,15 @@ template<typename F>
 void Node<F>::clear() {
 	_self = _left = _right = _depth = -1;
 	_fea = F();
-	_cut_val = _pred = _beta = _sum_g = _sum_h = _sum_w = 0.0f;
+	_cut = _pred = _beta = _sum_g = _sum_h = _sum_w = 0.0f;
 }
 
 template<typename F>
 void Node<F>::dbginfo() const {
 	fprintf(stderr,"Node[%d]: L:%d R:%d depth:%d\n",_self,_left,_right,_depth);
-	fprintf(stderr," Cut: '%s'<%le miss_go_to:%c\n",qlib::to_string(_fea).c_str(),
-			_cut_val,_miss_go_left?'L':'R');
-	fprintf(stderr," pred(alpha):%le beta:%le\n",_pred,_beta);
-	fprintf(stderr," G:%le H:%le W:%le\n",_sum_g,_sum_h,_sum_w);
+	fprintf(stderr,"|Cut:'%s'<%le miss_go_to:%c\n",qlib::to_string(_fea).c_str(),
+			_cut,_miss_go_left?'L':'R');
+	fprintf(stderr,"|G:%le H:%le W:%le pred:%le beta:%le\n",_sum_g,_sum_h,_sum_w,_pred,_beta);
 }
 
 template<typename F>
@@ -50,7 +49,7 @@ void Node<F>::print(FILE * fo) const {
 		fprintf(fo,"%d:leaf=%.8le\n", _self, _pred);
 	else if(is_branch())
 		fprintf(fo,"%d:[%s<%le] yes=%d,no=%d,missing=%d\n",
-				_self, qlib::to_string(_fea).c_str(), _cut_val, _left, _right,
+				_self, qlib::to_string(_fea).c_str(), _cut, _left, _right,
 				_miss_go_left ? _left : _right);
 	else {
 		qlog_warning("Incomplete node:\n");
@@ -81,7 +80,7 @@ int Node<F>::parse(const char * text, int hint_id) {
 		}
 		_fea = parse_cstr<F>(p + 1, q);
 		p = q + 1;
-		_cut_val = strtod(p, &q);
+		_cut = strtod(p, &q);
 		if (*q != ']') {
 			qlog_warning("Expect ']' but got '%c'(%x)\n",*q,static_cast<unsigned>(*q));
 			return -4;
@@ -158,7 +157,7 @@ double Tree<F>::predict(const std::unordered_map<T, float>& sample,
 	auto it = sample.find(node._fea);
 	if (it == sample.end())
 		return predict(sample, (node._miss_go_left ? node._left : node._right));
-	if (it->second < node._cut_val)
+	if (it->second < node._cut)
 		return predict(sample, node._left);
 	else
 		return predict(sample, node._right);
@@ -194,8 +193,6 @@ void Tree<F>::predict(const FeaTable<F>& ft,
 		}
 	}
 }
-
-
 
 template<typename F>
 void Tree<F>::update(int node_id) {
@@ -302,7 +299,7 @@ bool Tree<F>::prune(int node_id) {
 		node._left = blank._left;
 		node._right = blank._right;
 		node._fea = blank._fea;
-		node._cut_val = blank._cut_val;
+		node._cut = blank._cut;
 		node._miss_go_left = blank._miss_go_left;
 		// delete nodes
 		(*this)[node._left].clear();

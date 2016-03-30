@@ -13,7 +13,7 @@ public:
 	int _depth; // 0 = root
 	// Split
 	FeaType _fea;
-	double _cut_val;
+	double _cut;
 	bool _miss_go_left;
 	// Value
 	double _pred; // prediction (alpha)

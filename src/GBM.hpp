@@ -356,7 +356,7 @@ public:
 			//	qlog_warning("Updating root as intercept is not converged.\n");
 			diff *= _param.eta;
 			for(size_t i=0;i<ni.size();i++)
-				if(ni[i]==node._self)
+				if(ni[i]==node._self) // XXX: This should be if(ni[i] is offspring of node._self)
 					_f[i] += diff;
 			node._beta += diff;
 			f_altered = true;
