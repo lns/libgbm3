@@ -52,6 +52,8 @@ public:
 	template<typename T>
 	inline double predict(const std::unordered_map<T, float>& sample,
 			int node_id = 0) const;
+	// make predictions on a FeaType, add results to f
+	inline void predict(const FeaTable<FeaType>& ft, std::vector<double>& f) const;
 	// [Recursive] print a tree (or subtree of node_id)
 	inline void print(int node_id = 0, FILE * fo = stdout) const;
 	// Print debug info
@@ -66,6 +68,8 @@ public:
 	inline bool is_correct(int node_id = 0) const;
 	// [Recursive] whether the tree is constructed completely.
 	inline bool is_complete(int node_id = 0) const;
+	// [Recursive] Prune nodes with both left and right _beta zero.
+	inline bool prune(int node_id = 0);
 };
 
 template<typename FeaType>

@@ -3,6 +3,7 @@
 #include <algorithm> // std::max()
 #include <vector>
 #include <cstdint>
+#include <random>
 #include "Objective.hpp"
 #include "FeaTable.hpp"
 #include "Tree.hpp"
@@ -34,11 +35,15 @@ public:
 	void print() const { printf("g: %le, h: %le, w: %le\n",_g,_h,_w); }
 };
 
+// NodeIdType should be a int type, for safety it should be signed.
+typedef int8_t NodeIdType;
+typedef std::vector<NodeIdType> NodeIndex;
+
 template<typename FeaType>
 class Cut {
 public:
 	int tree_id;
-	int node_id;
+	NodeIdType node_id;
 	FeaType fea;
 	double cut; // cut val
 	double gain; // decreasing of regularized loss
@@ -49,15 +54,6 @@ public:
 	Cut() : tree_id(-1), node_id(-1), fea(), cut(0.0f), gain(0.0f), 
 		pred_L(0.0f), pred_R(0.0f), miss_go_left(false) {}
 
-	class Comp {
-	public:
-		inline bool operator()(const Cut& a, const Cut& b) {
-			return (a.gain > b.gain or (a.gain==b.gain 
-						and (a.tree_id < b.tree_id or (a.tree_id==b.tree_id
-								and a.node_id < b.node_id))));
-		}
-	};
-
 	void print() const {
 		printf("Forest[%d][%d]: ['%s'<%le] L:%le R:%le miss:%c gain:%le\n",
 				tree_id, node_id, qlib::to_string(fea).c_str(),
@@ -65,11 +61,22 @@ public:
 	}
 };
 
-typedef std::vector<int8_t> NodeIndex;
+template<typename FeaType>
+class CutComp {
+public:
+	inline bool operator()(const Cut<FeaType>& a, const Cut<FeaType>& b) {
+		return (a.gain > b.gain or (a.gain==b.gain 
+					and (a.tree_id < b.tree_id or (a.tree_id==b.tree_id
+							and a.node_id < b.node_id))));
+	}
+};
 
 template<typename FeaType>
 class GBM {
 public:
+	std::random_device _rand_dev;
+	std::mt19937 _rand_gen;
+	//
 	const Parameters& _param;
 	Objective<double> * _obj;
 	FeaTable<FeaType> _ft;
@@ -100,7 +107,8 @@ public:
 	Forest<FeaType> _forest;
 	std::vector<NodeIndex> _vec_ni;
 
-	GBM(const Parameters& param) : _param(param) {}
+	GBM(const Parameters& param) : _rand_dev(), _rand_gen(_rand_dev()),
+		_param(param) {}
 
 	// Read data from libsvm format file
 	inline void read_data_from_libsvm(const char * file_name) {
@@ -124,19 +132,41 @@ public:
 		// since only root's sum_g,h are updated.
 		if(update_tree_beta_and_f(_forest.size()-1))
 			qlog_warning("intercept is not converged. "
-					"Try a smllaer inner_thres and inner_precs.\n");
+					"Try a smllaer update_thres and update_precs.\n");
 	}
 
 	/**
 	 * Assign weights
 	 */
-	inline void assign_weights() {
+	inline void assign_weights(bool do_balance = false) {
 		// At least two things can be done here:
 		// 1. Reweight positive samples to balance the labels
 		// 2. Set some weights to zero to do row sampling
 		// (maybe we need another vector to mark for train/test and CV
-		for(size_t i=0;i<_stats.size();++i)
-			_stats[i]._w = _sample_weight[i];
+		if(not do_balance)
+			for(size_t i=0;i<_stats.size();++i)
+				_stats[i]._w = _sample_weight[i];
+		else {
+			// count positive and negative weights
+			double sum_positive_w = 0, sum_negative_w = 0;
+			for(size_t i=0;i<_y.size();++i) {
+				if(_y[i]>0.5)
+					sum_positive_w += _sample_weight[i];
+				else
+					sum_negative_w += _sample_weight[i];
+			}
+			if(sum_positive_w<=0 or sum_negative_w<=0)
+				qlog_error("sample_weight error! (%le,%le)\n",
+						sum_positive_w, sum_negative_w);
+			double scale_positive = 0.5*_y.size()/sum_positive_w;
+			double scale_negative = 0.5*_y.size()/sum_negative_w;
+			for(size_t i=0;i<_stats.size();++i) {
+				if(_y[i]>0.5)
+					_stats[i]._w = scale_positive * _sample_weight[i];
+				else
+					_stats[i]._w = scale_negative * _sample_weight[i];
+			}
+		}
 	}
 
 	/**
@@ -170,11 +200,19 @@ public:
 	/**
 	 * Get loss, based on _y and _f
 	 */
-	inline double loss() {
+	inline double loss(bool including_reg = true) {
 		double res = 0;
 		_obj->Loss(&_y[0], 1, &_f[0], 1, _y.size(), &_loss[0], 1);
 		for(size_t i=0;i<_loss.size();++i)
 			res += _loss[i]*_sample_weight[i];
+		if(including_reg)
+			for(auto&&tree : _forest)
+				for(auto&&node : tree) {
+					res += 0.5*_param.l2reg_base*std::pow(_param.l2reg_gamma, node._depth)
+						* node._beta * node._beta;
+					res += _param.l1reg_base*std::pow(_param.l1reg_gamma, node._depth)
+						* fabs(node._beta);
+				}
 		return res;
 	}
 
@@ -187,8 +225,8 @@ public:
 		res = sum_stats();
 		double diff = (argmin_reg_loss<double>(res._h, res._g, 0, 1e-6, _intercept));
 		//qlog_warning("intercept diff:%le\n",diff);
-		if(fabs(diff)<_param.inner_precs*
-				std::max(_param.inner_thres,fabs(_intercept)))
+		if(fabs(diff)<_param.update_precs*
+				std::max(_param.update_thres,fabs(_intercept)))
 			return false;
 		diff *= _param.eta;
 		for(auto&f: _f)
@@ -200,9 +238,10 @@ public:
 	/**
 	 * Find Best Feature to split
 	 */
-	Cut<FeaType> find_best_fea(int tree_id, int8_t node_id) const {
-		qlog_info("[%s] find_best_fea() for forest[%d][%d] ...\n",
-				qstrtime(),tree_id,node_id);
+	Cut<FeaType> find_best_fea(int tree_id, NodeIdType node_id,
+			double l2reg, double l1reg) const {
+		//qlog_info("[%s] find_best_fea() for forest[%d][%d] ...\n",
+		//		qstrtime(),tree_id,node_id);
 		const Tree<FeaType>& tree = _forest[tree_id];
 		const NodeIndex& ni = _vec_ni[tree_id];
 		std::vector<FeaType> features;
@@ -212,16 +251,16 @@ public:
 		std::vector<Cut<FeaType>> cuts(features.size());
 		#pragma omp parallel for
 		for(size_t i=0;i<features.size();i++) {
-			cuts[i] = find_best_cut(features[i], tree, ni, node_id);
+			cuts[i] = find_best_cut(features[i], tree, ni, node_id, l2reg, l1reg);
 		}
 		Cut<FeaType> best;
 		for(auto&&c: cuts)
 			if(c.gain > best.gain)
 				best = c;
-		qlog_info("[%s] best_fea found:\n",qstrtime());
+		//qlog_info("[%s] best_fea found:\n",qstrtime());
 		best.tree_id = tree_id;
 		best.node_id = node_id;
-		best.print();
+		//best.print();
 		return best;
 	}
 
@@ -229,7 +268,7 @@ public:
 	 * Find Best Cut for a feature
 	 */
 	inline Cut<FeaType> find_best_cut(const FeaType& fea, const Tree<FeaType>& tree,
-			const NodeIndex& ni, int8_t node_id) const {
+			const NodeIndex& ni, NodeIdType node_id, double l2reg, double l1reg) const {
 		Stats total;
 		total._g = tree[node_id]._sum_g;
 		total._h = tree[node_id]._sum_h;
@@ -257,17 +296,13 @@ public:
 				continue;
 			if(total._w - accum._w < _param.min_node_weight)
 				break;
-			double gain_R = -min_reg_loss<double>(accum._h, accum._g,
-					_param.l2reg, _param.l1reg, 0);
-			double gain_L = -min_reg_loss<double>(total._h-accum._h, total._g-accum._g,
-					_param.l2reg, _param.l1reg, 0);
+			double gain_R = -min_reg_loss<double>(accum._h, accum._g, l2reg, l1reg, 0);
+			double gain_L = -min_reg_loss<double>(total._h-accum._h, total._g-accum._g, l2reg, l1reg, 0);
 			if(gain_R+gain_L > best.gain) {
 				best.cut = 0.5*(last_entry->_val + this_entry->_val);
 				best.gain = gain_R+gain_L;
-				best.pred_R = argmin_reg_loss<double>(accum._h, accum._g,
-					_param.l2reg, _param.l1reg, 0);
-				best.pred_L = argmin_reg_loss<double>(total._h-accum._h, total._g-accum._g,
-					_param.l2reg, _param.l1reg, 0);
+				best.pred_R = argmin_reg_loss<double>(accum._h, accum._g, l2reg, l1reg, 0);
+				best.pred_L = argmin_reg_loss<double>(total._h-accum._h, total._g-accum._g, l2reg, l1reg, 0);
 			}
 		}
 		return best;
@@ -308,18 +343,17 @@ public:
 		// update beta and global f
 		bool f_altered = false;
 		for(auto&node: tree) {
-			#if 0
-			// With regularization, root's diff is normally zero.
-			if(node.depth==0) // skip root
-				continue;
-			#endif
+			// todo: With regularization, the root's diff should be zero.
+			// however during optimization, the root's sum_g may not be zero.
 			double diff = (argmin_reg_loss<double>(node._sum_h, node._sum_g,
-												 _param.l2reg, _param.l1reg, node._beta));
-			if(fabs(diff)<_param.inner_precs*
-					std::max(_param.inner_thres,fabs(node._beta)))
+												 _param.l2reg_base*std::pow(_param.l2reg_gamma, node._depth),
+												 _param.l1reg_base*std::pow(_param.l1reg_gamma, node._depth),
+												 node._beta));
+			if(fabs(diff)<_param.update_precs*
+					std::max(_param.update_thres,fabs(node._beta)))
 				continue;
-			if(node._depth==0)
-				qlog_warning("Updating root as intercept is not converged.\n");
+			//if(node._depth==0)
+			//	qlog_warning("Updating root as intercept is not converged.\n");
 			diff *= _param.eta;
 			for(size_t i=0;i<ni.size();i++)
 				if(ni[i]==node._self)
@@ -339,14 +373,18 @@ public:
 		qlog_info("[%s] Refine: loss():%le\n",qstrtime(),loss());
 		update_stats();
 		int iter = 0;
+		std::vector<size_t> indexes(_forest.size(),0);
+		for(size_t i=0;i<indexes.size();i++)
+			indexes[i] = i;
 		for(; iter<max_iter; iter++) {
 			bool updated = false;
 			if(update_intercept_and_f()) {
 				update_stats();
 				updated = true;
 			}
-			//todo: random order of update?
-			for(size_t i=0;i<_forest.size();i++)
+			//random order of update
+			std::shuffle(indexes.begin(), indexes.end(), _rand_gen);
+			for(auto&&i : indexes)
 				if(update_tree_beta_and_f(i)) {
 					update_stats();
 					updated = true;
@@ -389,8 +427,11 @@ public:
 		int R_node_id = tree.grow(cut.node_id,R);
 		tree[cut.node_id]._right = R_node_id;
 		// 3. Update nodeIndex
+		// move sample from parent_id to children_id
 		const std::vector<FTEntry>& fea_vec = _ft.find(cut.fea)->second;
 		for(auto&&entry : fea_vec) {
+			if(ni[entry._row]!=cut.node_id)
+				continue;
 			if(entry._val < cut.cut)
 				ni[entry._row] = tree[cut.node_id]._left;
 			else
@@ -405,12 +446,104 @@ public:
 			qlog_warning("Checking failed.\n");
 	}
 
+	class Task {
+	public:
+		int tree_id;
+		NodeIdType node_id;
+		double l2reg;
+		double l1reg;
+
+		Task(int tid, NodeIdType nid, double l2, double l1) :
+			tree_id(tid), node_id(nid), l2reg(l2), l1reg(l1) {}
+	};
+
 	/**
 	 * Boost the forest
 	 */
 	inline void boost() {
-		if(_forest.empty())
-			;
+		refine(_param.max_inner_iter);
+		for(size_t iter=0; ; iter++) {
+			size_t n_leaves = 0;
+			for(auto&&tree : _forest)
+				for(auto&&node : tree)
+					if(node.is_leaf())
+						n_leaves ++;
+			if(n_leaves>=_param.max_leaves)
+				break;
+			if(_forest.empty() or (_forest.back().size()>1 
+						and _forest.size() <= _param.max_trees)) {
+				printf("Add a new tree.\n");
+				add_new_tree();
+				continue;
+			}
+			std::vector<Task> tasks;
+			for(size_t i=std::max<int>(0,_forest.size()-1-_param.search_recent_tree);
+					i<_forest.size();i++) {
+				auto tree = _forest[i];
+				if(tree.size() >= _param.max_tree_node)
+					continue;
+				for(auto&&node : tree) {
+					if(node.is_leaf() and node._depth<_param.max_depth)
+						tasks.push_back(Task(i,node._self,
+									_param.l2reg_base*std::pow(_param.l2reg_gamma, node._depth),
+									_param.l1reg_base*std::pow(_param.l1reg_gamma, node._depth)));
+				}
+			}
+			if(tasks.empty())
+				break;
+			std::vector<Cut<FeaType>> candidates(tasks.size(), Cut<FeaType>());
+			#pragma omp parallel for
+			for(size_t i=0; i<tasks.size(); i++) {
+				candidates[i] = find_best_fea(tasks[i].tree_id, tasks[i].node_id, tasks[i].l2reg, tasks[i].l1reg);
+			}
+			std::sort(candidates.begin(), candidates.end(), CutComp<FeaType>());
+			/*
+			char c;
+			printf("[ENTER to continue]");
+			fflush(stdout);
+			scanf("%c",&c);
+			*/
+			double current_loss = loss();
+			printf("iter: %4zu, reg_loss: %le, loss: %le\n", iter,
+					current_loss, loss(false));
+			if(candidates[0].gain < std::max(_param.outer_thres, 
+						_param.outer_precs*current_loss))
+				break;
+			// Use the cut found to split
+			printf("best candidates gain: %le (approx.)\n",candidates[0].gain);
+			split(candidates[0]);
+			update_tree_beta_and_f(candidates[0].tree_id);
+			printf("      +node reg_loss: %le, loss: %le\n", loss(), loss(false));
+			refine(_param.max_inner_iter);
+			// todo: prune zero node (if gain < threshold, instead of zero node)
+			for(auto&tree: _forest) {
+				while(tree.prune());
+			}
+		}
+	}
+
+	/**
+	 * Output the model
+	 */
+	inline Forest<FeaType> output_model() const {
+		Forest<FeaType> Woods = _forest;
+		if(Woods.empty())
+			return Woods;
+		Woods.back()[0]._beta += _intercept;
+		for(auto&tree : Woods)
+			tree.update();
+		return Woods;
+	}
+
+	/**
+	 * Save the model
+	 */
+	inline void save_to_file(const char * file_name) const {
+		Forest<FeaType> Woods = output_model();
+		FILE * f = fopen(file_name, "w");
+		//todo: print parameters
+		Woods.print(f);
+		fclose(f);
 	}
 
 };

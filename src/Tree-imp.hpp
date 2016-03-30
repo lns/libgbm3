@@ -47,7 +47,7 @@ void Node<F>::print(FILE * fo) const {
 	for(int i=0;i<_depth;i++)
 		fprintf(fo,"\t");
 	if(is_leaf())
-		fprintf(fo,"%d:leaf=%lf\n", _self, _pred);
+		fprintf(fo,"%d:leaf=%.8le\n", _self, _pred);
 	else if(is_branch())
 		fprintf(fo,"%d:[%s<%le] yes=%d,no=%d,missing=%d\n",
 				_self, qlib::to_string(_fea).c_str(), _cut_val, _left, _right,
@@ -165,19 +165,52 @@ double Tree<F>::predict(const std::unordered_map<T, float>& sample,
 }
 
 template<typename F>
+void Tree<F>::predict(const FeaTable<F>& ft,
+		std::vector<double>& f) const {
+	std::vector<int> ni(ft.size(),0);
+	// we can rely on the fact that parent appears before children
+	for(auto&& node : (*this)) {
+		if(node.is_empty())
+			continue;
+		if(node.is_leaf()) { // make prediction
+			for(size_t i=0;i<f.size();i++)
+				if(ni[i]==node._self)
+					f[i] += node._pred;
+		}
+		if(node.is_branch()) {
+			const auto& fea_vec = ft.find(node._fea)->second;
+			for(auto&&entry : fea_vec) {
+				if(ni[entry._row]!=node._self)
+					continue;
+				if(entry._val < node.cut_val)
+					ni[entry._row] = node._left;
+				else
+					ni[entry._row] = node._right;
+			}
+			int miss = node._miss_go_left ? node._left : node._right;
+			for(auto&x: ni)
+				if(x==node._self)
+					x = miss;
+		}
+	}
+}
+
+
+
+template<typename F>
 void Tree<F>::update(int node_id) {
-	if(this->size()==0)
+	if(this->empty())
 		return;
-	auto root = (*this)[node_id];
+	Node<F>& root = (*this)[node_id];
 	if(root._depth==0)
 		root._pred = root._beta;
 	if(root._left!=-1) {
-		auto left = (*this)[root._left];
+		Node<F>& left = (*this)[root._left];
 		left._pred = root._pred + left._beta;
 		update(root._left);
 	}
 	if(root._right!=-1) {
-		auto right = (*this)[root._right];
+		Node<F>& right = (*this)[root._right];
 		right._pred = root._pred + right._beta;
 		update(root._right);
 	}
@@ -253,6 +286,33 @@ bool Tree<F>::is_complete(int node_id) const {
 		}
 		return test;
 	}
+}
+
+template<typename F>
+bool Tree<F>::prune(int node_id) {
+	// todo: The implementation will only prune the lowest nodes.
+	// We possibly need to search for higher zero node when its lower nodes will
+	// be pruned.
+	Node<F>& node = (*this)[node_id];
+	if (not node.is_branch())
+		return false;
+	if ((*this)[node._left].is_leaf() and fabs((*this)[node._left]._beta)<1e-6 and
+			(*this)[node._right].is_leaf() and fabs((*this)[node._right]._beta)<1e-6) {
+		const Node<F> blank;
+		node._left = blank._left;
+		node._right = blank._right;
+		node._fea = blank._fea;
+		node._cut_val = blank._cut_val;
+		node._miss_go_left = blank._miss_go_left;
+		// delete nodes
+		(*this)[node._left].clear();
+		(*this)[node._right].clear();
+		// shrink size
+		while(not this->empty() and this->back().is_empty())
+			this->pop_back();
+		return true;
+	} else
+		return(this->prune(node._left) or this->prune(node._right));
 }
 
 template<typename F>
