@@ -64,7 +64,7 @@ public:
 		std::string line;
 		size_t r = 0;
 		while(getline(ifs,line)) {
-			out_y.push_back(qstrtod(line.c_str(),nullptr));
+			out_y.push_back(qstrtod(line.c_str(),nullptr)>0?1:0);
 			for(const char * head = qnextok(line.c_str());
 					head != line.c_str()+line.size(); head = qnextok(head)) {
 				char * q = strchr(head,':');
@@ -84,7 +84,7 @@ public:
 
 	// print info
 	inline void print() const {
-		qlog_info("size(): %lu\n", this->size());
+		qlog_info("#features: %lu\n", this->size());
 	}
 };
 

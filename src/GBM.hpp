@@ -11,6 +11,14 @@
 #include "qstdlib.hpp" // qlib::to_string
 #include "util.hpp"
 
+#if 0
+#define CHECK_F() do{ if(not check_f()) {_forest.print(); qlog_error("check_f() failed.\n");}} while(false)
+#define CHECK_LOSS(omit) do{ if(not check_loss(omit)) {qlog_error("check_loss() failed.\n");}} while(false)
+#else
+#define CHECK_F()
+#define CHECK_LOSS(x)
+#endif
+
 class Stats {
 public:
 	double _g;
@@ -26,8 +34,7 @@ public:
 		return *this;
 	}
 
-	inline friend Stats operator+(Stats lhs, const Stats& rhs)
-	{
+	inline friend Stats operator+(Stats lhs, const Stats& rhs) {
 		lhs += rhs;
 		return lhs;
 	}
@@ -47,8 +54,8 @@ public:
 	FeaType fea;
 	double cut; // cut val
 	double gain; // decreasing of regularized loss
-	double pred_L;
-	double pred_R;
+	double pred_L; // best left pred found by argmin reged approx loss
+	double pred_R; // best right pred found by argmin reged approx loss
 	bool miss_go_left;
 
 	Cut() : tree_id(-1), node_id(-1), fea(), cut(0.0f), gain(0.0f), 
@@ -65,9 +72,7 @@ template<typename FeaType>
 class CutComp {
 public:
 	inline bool operator()(const Cut<FeaType>& a, const Cut<FeaType>& b) {
-		return (a.gain > b.gain or (a.gain==b.gain 
-					and (a.tree_id < b.tree_id or (a.tree_id==b.tree_id
-							and a.node_id < b.node_id))));
+		return (a.gain > b.gain);
 	}
 };
 
@@ -80,7 +85,6 @@ public:
 	const Parameters& _param;
 	Objective<double> * _obj;
 	FeaTable<FeaType> _ft;
-	//DataSheet<uint32_t> _ds;
 
 	/**
 	 * g is weight-adjusted gradient
@@ -103,7 +107,7 @@ public:
 	/**
 	 * Model
 	 */
-	double _intercept;
+	double _intercept; // do we really need an intercept?
 	Forest<FeaType> _forest;
 	std::vector<NodeIndex> _vec_ni;
 
@@ -124,15 +128,22 @@ public:
 	 * Add a new tree with root node.
 	 * And update tree sum_g,h and beta and f
 	 */
-	inline void add_new_tree() {
+	inline bool add_new_tree() {
 		_forest.push_back(Tree<FeaType>());
 		_forest.back().grow(-1, Node<FeaType>());
 		_vec_ni.push_back(NodeIndex(_stats.size(), 0));
 		// todo: This can be further optimized,
 		// since only root's sum_g,h are updated.
-		if(update_tree_beta_and_f(_forest.size()-1))
+		CHECK_F();
+		CHECK_LOSS(true);
+		if(update_tree_pred_and_f(_forest.size()-1)) {
+			CHECK_F();
+			CHECK_LOSS();
 			qlog_warning("intercept is not converged. "
-					"Try a smllaer update_thres and update_precs.\n");
+					"Try a smaller update_thres and update_precs.\n");
+			return true;
+		} else
+			return false;
 	}
 
 	/**
@@ -170,7 +181,7 @@ public:
 	}
 
 	/**
-	 * Update _g, _h and using _y, _f and _w
+	 * Compute _g, _h from _y, _f and _w
 	 */
 	inline void update_stats() {
 		if(_y.size()==0)
@@ -192,27 +203,26 @@ public:
 	inline Stats sum_stats() const {
 		Stats res;
 		res._g = res._h = res._w = 0.0f;
-		for(auto&&s: _stats)
+		for(const auto&s: _stats)
 			res += s;
 		return res;
 	}
 
 	/**
-	 * Get loss, based on _y and _f
+	 * Get loss, based on _y and _f (and _pred in _forest for reg)
 	 */
 	inline double loss(bool including_reg = true) {
 		double res = 0;
 		_obj->Loss(&_y[0], 1, &_f[0], 1, _y.size(), &_loss[0], 1);
 		for(size_t i=0;i<_loss.size();++i)
-			res += _loss[i]*_sample_weight[i];
+			res += _loss[i]*_stats[i]._w; // weighted with _w
 		if(including_reg)
-			for(auto&&tree : _forest)
-				for(auto&&node : tree) {
-					res += 0.5*_param.l2reg_base*std::pow(_param.l2reg_gamma, node._depth)
-						* node._beta * node._beta;
-					res += _param.l1reg_base*std::pow(_param.l1reg_gamma, node._depth)
-						* fabs(node._beta);
-				}
+			for(const auto& tree : _forest)
+				for(const auto& node : tree)
+					if(node.is_leaf()) {
+						res += 0.5 * _param.l2reg * node._pred * node._pred;
+						res += _param.l1reg * fabs(node._pred);
+					}
 		return res;
 	}
 
@@ -221,17 +231,22 @@ public:
 	 * @return whether f is altered.
 	 */
 	inline bool update_intercept_and_f() {
+		CHECK_F();
 		Stats res;
 		res = sum_stats();
-		double diff = (argmin_reg_loss<double>(res._h, res._g, 0, 1e-6, _intercept));
-		//qlog_warning("intercept diff:%le\n",diff);
-		if(fabs(diff)<_param.update_precs*
-				std::max(_param.update_thres,fabs(_intercept)))
+		double diff = argmin_reg_loss<double>(res._h,
+					res._g - _intercept*res._h, 0, 1e-6) - _intercept;
+		//qlog_warning("intercept:%le diff:%le\n",_intercept, diff);
+		if(fabs(diff)< std::max(_param.update_thres,
+					_param.update_precs*fabs(_intercept)))
 			return false;
 		diff *= _param.eta;
-		for(auto&f: _f)
+		CHECK_LOSS(true);
+		for(auto&& f : _f)
 			f += diff;
 		_intercept += diff;
+		CHECK_F();
+		CHECK_LOSS();
 		return true;
 	}
 
@@ -246,7 +261,7 @@ public:
 		const NodeIndex& ni = _vec_ni[tree_id];
 		std::vector<FeaType> features;
 		features.reserve(_ft.size());
-		for(auto&&it: _ft)
+		for(const auto& it : _ft)
 			features.push_back(it.first);
 		std::vector<Cut<FeaType>> cuts(features.size());
 		#pragma omp parallel for
@@ -254,7 +269,7 @@ public:
 			cuts[i] = find_best_cut(features[i], tree, ni, node_id, l2reg, l1reg);
 		}
 		Cut<FeaType> best;
-		for(auto&&c: cuts)
+		for(const auto& c: cuts)
 			if(c.gain > best.gain)
 				best = c;
 		//qlog_info("[%s] best_fea found:\n",qstrtime());
@@ -270,9 +285,10 @@ public:
 	inline Cut<FeaType> find_best_cut(const FeaType& fea, const Tree<FeaType>& tree,
 			const NodeIndex& ni, NodeIdType node_id, double l2reg, double l1reg) const {
 		Stats total;
-		total._g = tree[node_id]._sum_g;
-		total._h = tree[node_id]._sum_h;
-		total._w = tree[node_id]._sum_w;
+		const Node<FeaType>& node = tree[node_id];
+		total._g = node._sum_g;
+		total._h = node._sum_h;
+		total._w = node._sum_w;
 		const std::vector<FTEntry> fea_vec = _ft.find(fea)->second;
 		size_t n = fea_vec.size();
 		Cut<FeaType> best; // for return results
@@ -280,9 +296,11 @@ public:
 		best.miss_go_left = true; // always
 		Stats accum; // for accumulate stats
 		const FTEntry *this_entry, *last_entry = &fea_vec[0];
+		double obj_cur = min_reg_loss<double>(total._h,
+				total._g - node._pred*total._h, l2reg, l1reg);
 		for(size_t i=1; i<n; last_entry=this_entry, i++) {
 			this_entry = &fea_vec[i];
-			auto r = last_entry->_row;
+			const auto r = last_entry->_row;
 			// TODO: This can be optimized so that if ni[r]!=current node_id
 			// the statistics can be accumulated to another candidates.
 			// This is especially useful when a node is split into two
@@ -296,27 +314,35 @@ public:
 				continue;
 			if(total._w - accum._w < _param.min_node_weight)
 				break;
-			double gain_R = -min_reg_loss<double>(accum._h, accum._g, l2reg, l1reg, 0);
-			double gain_L = -min_reg_loss<double>(total._h-accum._h, total._g-accum._g, l2reg, l1reg, 0);
-			if(gain_R+gain_L > best.gain) {
+			double obj_R = min_reg_loss<double>(accum._h,
+					accum._g - node._pred*accum._h, l2reg, l1reg);
+			double obj_L = min_reg_loss<double>(total._h-accum._h,
+					total._g-accum._g - node._pred*(total._h-accum._h), l2reg, l1reg);
+			double gain = obj_cur - (obj_R + obj_L);
+			if(gain > best.gain) {
 				best.cut = 0.5*(last_entry->_val + this_entry->_val);
-				best.gain = gain_R+gain_L;
-				best.pred_R = argmin_reg_loss<double>(accum._h, accum._g, l2reg, l1reg, 0);
-				best.pred_L = argmin_reg_loss<double>(total._h-accum._h, total._g-accum._g, l2reg, l1reg, 0);
+				best.gain = gain;
+				//NOTE: this is not shrinked by _param.eta
+				best.pred_R = argmin_reg_loss<double>(accum._h,
+					accum._g - node._pred*accum._h, l2reg, l1reg);
+				best.pred_L = argmin_reg_loss<double>(total._h-accum._h,
+					total._g-accum._g - node._pred*(total._h-accum._h), l2reg, l1reg);
 			}
 		}
 		return best;
 	}
 
 	/**
-	 * When g,h,w in _stats are changed, update sum_g,h,w of each node in the tree,
-	 * if loss can be decreased, update beta of each node, also update global f.
+	 * When g,h,w in _stats are changed, or tree changed,
+	 * update sum_g,h,w of each node in the tree,
+	 * if loss can be decreased, update pred of each node, also update global f.
 	 * @return whether f is altered (which means beta is also altered)
 	 */
-	inline bool update_tree_beta_and_f(int tree_id) {
+	inline bool update_tree_pred_and_f(int tree_id) {
+		CHECK_F();
 		Tree<FeaType>& tree = _forest[tree_id];
 		const NodeIndex& ni = _vec_ni[tree_id];
-		for(auto&node: tree)
+		for(auto&& node : tree)
 			if(not node.is_empty()) {
 				node._sum_g = 0.0f;
 				node._sum_h = 0.0f;
@@ -329,7 +355,7 @@ public:
 			tree[ni[i]]._sum_h += _stats[i]._h;
 			tree[ni[i]]._sum_w += _stats[i]._w;
 		}
-		// traverse in reverse order
+		// Optional: traverse in reverse order
 		// so that children are visited before their parent
 		for(long i=tree.size()-1; i>=0; i--) {
 			if(tree[i].is_branch()) {
@@ -340,27 +366,68 @@ public:
 				tree[i]._sum_w = L._sum_w + R._sum_w;
 			}
 		}
+		CHECK_F();
 		// update beta and global f
 		bool f_altered = false;
-		for(auto&node: tree) {
-			// todo: With regularization, the root's diff should be zero.
-			// however during optimization, the root's sum_g may not be zero.
-			double diff = (argmin_reg_loss<double>(node._sum_h, node._sum_g,
-												 _param.l2reg_base*std::pow(_param.l2reg_gamma, node._depth),
-												 _param.l1reg_base*std::pow(_param.l1reg_gamma, node._depth),
-												 node._beta));
-			if(fabs(diff)<_param.update_precs*
-					std::max(_param.update_thres,fabs(node._beta)))
+		for(auto&& node : tree) {
+			if(not node.is_leaf())
 				continue;
-			//if(node._depth==0)
-			//	qlog_warning("Updating root as intercept is not converged.\n");
+			double loss_before = loss(true);
+			CHECK_LOSS(true);
+			// todo: Use inner loss reduction threshold to stop
+			double approx_loss_diff = 
+				min_reg_loss<double>(node._sum_h, node._sum_g - node._pred*node._sum_h,
+					_param.l2reg, _param.l1reg)
+				-   reg_loss<double>(node._sum_h, node._sum_g - node._pred*node._sum_h,
+					_param.l2reg, _param.l1reg, node._pred);
+			double diff = argmin_reg_loss<double>(node._sum_h,
+					node._sum_g - node._pred*node._sum_h,
+					_param.l2reg, _param.l1reg) - node._pred;
+			if(fabs(diff) < std::max(_param.update_thres,
+						_param.update_precs*fabs(node._pred)))
+				continue;
 			diff *= _param.eta;
 			for(size_t i=0;i<ni.size();i++)
-				if(ni[i]==node._self) // XXX: This should be if(ni[i] is offspring of node._self)
+				if(ni[i]==node._self)
 					_f[i] += diff;
-			node._beta += diff;
+			node._pred += diff;
+			double loss_after = loss(true);
+			if(loss_after > loss_before) {
+				qlog_info("before update: loss():%le\n",loss_before);
+				qlog_info("after update: loss():%le\n",loss_after);
+				qlog_warning("Loss increased!\n");
+				qlog_info("approx_loss_diff: %le\n",approx_loss_diff);
+				qlog_info("old: %le new: %le diff: %le\n",node._pred-diff,node._pred,diff);
+				node.dbginfo();
+				tree.print();
+				char c;
+				printf("[ENTER to continue]");
+				fflush(stdout);
+				scanf("%c",&c);
+				if(true) { //reverse direction
+					qlog_info("Dump to 'tmp'\n");
+					FILE * f=fopen("tmp","w");
+					for(size_t i=0;i<_stats.size();i++)
+						fprintf(f,"%le,%le,%le,%le,%le\n",
+								_y[i],_stats[i]._g,_stats[i]._h,_stats[i]._w,_f[i]);
+					fclose(f);
+					qlog_warning("Try to reverse update direction:\n");
+					for(size_t i=0;i<ni.size();i++)
+						if(ni[i]==node._self)
+							_f[i] -= 2*diff;
+					node._pred -= 2*diff;
+					CHECK_LOSS();
+					printf("[ENTER to continue]");
+					fflush(stdout);
+					scanf("%c",&c);
+				}
+			}
+			CHECK_F();
+			CHECK_LOSS();
 			f_altered = true;
 		}
+		CHECK_F();
+		CHECK_LOSS();
 		return f_altered;
 	}
 
@@ -371,24 +438,32 @@ public:
 	 */
 	inline int refine(int max_iter) {
 		qlog_info("[%s] Refine: loss():%le\n",qstrtime(),loss());
+		CHECK_F();
 		update_stats();
 		int iter = 0;
 		std::vector<size_t> indexes(_forest.size(),0);
 		for(size_t i=0;i<indexes.size();i++)
 			indexes[i] = i;
+		//std::shuffle(indexes.begin(), indexes.end(), _rand_gen);
+		CHECK_LOSS();
 		for(; iter<max_iter; iter++) {
+			CHECK_F();
 			bool updated = false;
 			if(update_intercept_and_f()) {
 				update_stats();
 				updated = true;
 			}
+			CHECK_LOSS();
 			//random order of update
-			std::shuffle(indexes.begin(), indexes.end(), _rand_gen);
-			for(auto&&i : indexes)
-				if(update_tree_beta_and_f(i)) {
+			for(const auto i : indexes) {
+				if(update_tree_pred_and_f(i)) {
 					update_stats();
 					updated = true;
 				}
+			CHECK_F();
+			CHECK_LOSS();
+			}
+
 			if(not updated)
 				break;
 		}
@@ -413,23 +488,25 @@ public:
 					qlib::to_string(cut.fea).c_str());
 		// 1. Record cut info in current node
 		tree[cut.node_id]._fea = cut.fea;
-		tree[cut.node_id]._cut_val = cut.cut;
+		tree[cut.node_id]._cut = cut.cut;
 		tree[cut.node_id]._miss_go_left = cut.miss_go_left;
 		Node<FeaType> L, R;
 		L._depth = R._depth = tree[cut.node_id]._depth+1;
-		// The predictions here won't be used. Normally they will be later updated by
-		// update_tree_beta_and_f(), whose value should be same.
-		L._beta = cut.pred_L;
-		R._beta = cut.pred_R;
+		// These predictions should be remain identical to parent's prediction.
+		// Which will be later updated in update_tree_pred_and_f()
+		L._pred = tree[cut.node_id]._pred; //cut.pred_L;
+		R._pred = tree[cut.node_id]._pred; //cut.pred_R;
+		tree[cut.node_id]._pred = 0.0f; // for safety
 		// 2. Add to tree // We should not assign value while operate on the vector.
 		int L_node_id = tree.grow(cut.node_id,L);
 		tree[cut.node_id]._left = L_node_id;
 		int R_node_id = tree.grow(cut.node_id,R);
 		tree[cut.node_id]._right = R_node_id;
 		// 3. Update nodeIndex
+		CHECK_LOSS(true);
 		// move sample from parent_id to children_id
 		const std::vector<FTEntry>& fea_vec = _ft.find(cut.fea)->second;
-		for(auto&&entry : fea_vec) {
+		for(const auto& entry : fea_vec) {
 			if(ni[entry._row]!=cut.node_id)
 				continue;
 			if(entry._val < cut.cut)
@@ -438,10 +515,11 @@ public:
 				ni[entry._row] = tree[cut.node_id]._right;
 		}
 		int miss = cut.miss_go_left? tree[cut.node_id]._left : tree[cut.node_id]._right;
-		for(auto&x: ni)
+		for(auto&&x: ni)
 			if(x==cut.node_id)
 				x = miss;
 		// 4. (Optional) Check
+		CHECK_LOSS();
 		if(not tree.is_correct(cut.node_id))
 			qlog_warning("Checking failed.\n");
 	}
@@ -457,15 +535,18 @@ public:
 			tree_id(tid), node_id(nid), l2reg(l2), l1reg(l1) {}
 	};
 
+
 	/**
 	 * Boost the forest
 	 */
 	inline void boost() {
 		refine(_param.max_inner_iter);
+		CHECK_LOSS();
+		CHECK_F();
 		for(size_t iter=0; ; iter++) {
 			size_t n_leaves = 0;
-			for(auto&&tree : _forest)
-				for(auto&&node : tree)
+			for(const auto& tree : _forest)
+				for(const auto& node : tree)
 					if(node.is_leaf())
 						n_leaves ++;
 			if(n_leaves>=_param.max_leaves)
@@ -473,20 +554,25 @@ public:
 			if(_forest.empty() or (_forest.back().size()>1 
 						and _forest.size() <= _param.max_trees)) {
 				printf("Add a new tree.\n");
-				add_new_tree();
+				CHECK_LOSS();
+				CHECK_F();
+				if(add_new_tree()) // f maybe altered
+					update_stats();
+				CHECK_LOSS();
+				refine(_param.max_inner_iter);
+				CHECK_LOSS();
+				CHECK_F();
 				continue;
 			}
 			std::vector<Task> tasks;
 			for(size_t i=std::max<int>(0,_forest.size()-1-_param.search_recent_tree);
 					i<_forest.size();i++) {
-				auto tree = _forest[i];
+				const auto& tree = _forest[i];
 				if(tree.size() >= _param.max_tree_node)
 					continue;
-				for(auto&&node : tree) {
+				for(const auto& node : tree) {
 					if(node.is_leaf() and node._depth<_param.max_depth)
-						tasks.push_back(Task(i,node._self,
-									_param.l2reg_base*std::pow(_param.l2reg_gamma, node._depth),
-									_param.l1reg_base*std::pow(_param.l1reg_gamma, node._depth)));
+						tasks.push_back(Task(i,node._self,_param.l2reg,_param.l1reg));
 				}
 			}
 			if(tasks.empty())
@@ -497,12 +583,6 @@ public:
 				candidates[i] = find_best_fea(tasks[i].tree_id, tasks[i].node_id, tasks[i].l2reg, tasks[i].l1reg);
 			}
 			std::sort(candidates.begin(), candidates.end(), CutComp<FeaType>());
-			/*
-			char c;
-			printf("[ENTER to continue]");
-			fflush(stdout);
-			scanf("%c",&c);
-			*/
 			double current_loss = loss();
 			printf("iter: %4zu, reg_loss: %le, loss: %le\n", iter,
 					current_loss, loss(false));
@@ -511,14 +591,15 @@ public:
 				break;
 			// Use the cut found to split
 			printf("best candidates gain: %le (approx.)\n",candidates[0].gain);
+			CHECK_LOSS();
 			split(candidates[0]);
-			update_tree_beta_and_f(candidates[0].tree_id);
+			//CHECK_LOSS(); This will increase a little due to regularization
+			update_tree_pred_and_f(candidates[0].tree_id);
+			update_stats();
+			CHECK_LOSS();
 			printf("      +node reg_loss: %le, loss: %le\n", loss(), loss(false));
 			refine(_param.max_inner_iter);
-			// todo: prune zero node (if gain < threshold, instead of zero node)
-			for(auto&tree: _forest) {
-				while(tree.prune());
-			}
+			CHECK_LOSS();
 		}
 	}
 
@@ -529,9 +610,9 @@ public:
 		Forest<FeaType> Woods = _forest;
 		if(Woods.empty())
 			return Woods;
-		Woods.back()[0]._beta += _intercept;
-		for(auto&tree : Woods)
-			tree.update();
+		for(auto&&node: Woods.back())
+			if(node.is_leaf())
+				node._pred += _intercept;
 		return Woods;
 	}
 
@@ -544,6 +625,45 @@ public:
 		//todo: print parameters
 		Woods.print(f);
 		fclose(f);
+	}
+
+	/**
+	 * Check if loss is decreasing.
+	 */
+	inline bool check_loss(bool omit_test = false) {
+		static double last_loss = loss(true);
+		double this_loss = loss(true);
+		if(not omit_test and this_loss>last_loss) {
+			qlog_info("Loss increased from %le to %le\n",last_loss,this_loss);
+			return false;
+		}
+		else {
+			last_loss = this_loss;
+			return true;
+		}
+	}
+
+	/**
+	 * Check f, return true if different
+	 */
+	inline bool check_f() const {
+		std::vector<double> pred(_f.size(), 0);
+		Forest<FeaType> forest = output_model();
+		if(forest.empty()) {
+			qlog_warning("output_model() is empty. Skip.\n");
+			return true;
+		}
+		for(const auto& tree : forest) {
+			tree.predict(_ft, pred);
+		}
+		for(size_t i=0;i<_f.size();i++) {
+			if(fabs(pred[i]-_f[i])>1e-6) {
+				qlog_warning("[%ld]: pred!=_f: %le!=%le\nforest:\n",i,pred[i],_f[i]);
+				forest.print();
+				return false;
+			}
+		}
+		return true;
 	}
 
 };

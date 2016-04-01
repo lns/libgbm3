@@ -38,7 +38,7 @@ void DataSheet<FeaType>::from_libsvm(const char * file_name,
 		auto& sample = (*this)[this->size()-1];
 		++nr;
 		const char * head = line.c_str();
-		out_y.push_back(qstrtod(head,nullptr));
+		out_y.push_back(qstrtod(head,nullptr)>0?1:0);
 		for(const char * head = qnextok(line.c_str());
 				head != line.c_str()+line.size(); head = qnextok(head)) {
 			const char * q = strchr(head,':');

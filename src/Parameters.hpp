@@ -3,10 +3,8 @@
 class Parameters {
 public:
 	double eta; // stepsize
-	double l1reg_base;
-	double l1reg_gamma;
-	double l2reg_base;
-	double l2reg_gamma;
+	double l1reg;
+	double l2reg;
 	double update_thres; // stop threshold in update loop
 	double update_precs; // stop precision in update loop
 	// TODO: add inner stop criteria in refine()

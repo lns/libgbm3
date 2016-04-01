@@ -13,6 +13,8 @@ inline T soft_thres(T x, T thres) {
 }
 
 /**
+ * Definition 1:
+ *
  * Soft Thresholding solution of l1-reg loss
  *
  * L(x) := (x+c)^2 + d*fabs(x)
@@ -21,27 +23,31 @@ inline T soft_thres(T x, T thres) {
  */
 
 /**
+ * Definition 2:
+ *
  * Regularized Loss is
- *
- * 	L(x) := 0.5*a*x^2 + b*x + 0.5*l2reg*(x0+x)^2 - 0.5*l2reg*(x0)^2 
- * 		+ l1reg*fabs(x0+x) - l1reg*fabs(x0)
- *
+ * L(x) L= 0.5*a*x^2 + b*x + 0.5*l2reg*x^2 + l1reg*fabs(x)
+ * 
  * Solution is:
- * 	x_min = soft_thres(a*x0-b, l1reg)/(a+l2reg)-x0
- * 	L_min = L(0) - 0.5*(a+l2reg)*(x_min+x0)^2
+ * 	x_min = soft_thres(b, l1reg)/(a+l2reg)
+ *
+ * (The implementation is inspired from Tong Zhang's code.)
  */
-
+// Regularized Loss
+template<typename T>
+inline T reg_loss(T a, T b, T l2reg, T l1reg, T x) {
+	return(0.5*(a+l2reg)*x*x + b*x + l1reg*fabs(x));
+}
 // Argmin of Regularized Loss
 template<typename T>
-inline T argmin_reg_loss(T a, T b, T l2reg, T l1reg, T x0) {
-	return(soft_thres(a*x0-b, l1reg)/(a+l2reg)-x0);
+inline T argmin_reg_loss(T a, T b, T l2reg, T l1reg) {
+	return(soft_thres(-b, l1reg)/(a+l2reg));
 }
-
 // Minimum of Regularized Loss
 template<typename T>
-inline T min_reg_loss(T a, T b, T l2reg, T l1reg, T x0) {
-	T x_min = soft_thres(a*x0-b, l1reg)/(a+l2reg);
-	return(-0.5*(a+l2reg)*x_min*x_min);
+inline T min_reg_loss(T a, T b, T l2reg, T l1reg) {
+	double x_min = argmin_reg_loss(a,b,l2reg,l1reg);
+	return(reg_loss(a,b,l2reg,l1reg,x_min));
 }
 
 /**

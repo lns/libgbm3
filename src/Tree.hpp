@@ -16,8 +16,7 @@ public:
 	double _cut;
 	bool _miss_go_left;
 	// Value
-	double _pred; // prediction (alpha)
-	double _beta; // sum _beta along a path equals to _pred
+	double _pred; // prediction
 	// Statistics
 	double _sum_g; // gradient
 	double _sum_h; // hessian
@@ -62,8 +61,6 @@ public:
 	// @param parent: node_id of parent. (for grow a root, parent should be -1)
 	// @return node_id in the tree
 	inline int grow(int parent, const Node<FeaType>& node);	
-	// [Recursive] Update tree's _pred based on _beta
-	inline void update(int node_id = 0);
 	// [Recursive] Check the dependencies are correct. (depth, etc.)
 	inline bool is_correct(int node_id = 0) const;
 	// [Recursive] whether the tree is constructed completely.
