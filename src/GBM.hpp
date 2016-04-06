@@ -116,7 +116,8 @@ public:
 
 	// Read data from libsvm format file
 	inline void read_data_from_libsvm(const char * file_name) {
-		_ft.from_libsvm(file_name, _y);
+		_ft.from_libsvm_mp(file_name, _y); // Not complete!
+		//_ft.from_libsvm(file_name, _y);
 		_ft.sort();
 		_stats.resize(_y.size());
 		_f.resize(_y.size());
@@ -237,7 +238,7 @@ public:
 		double diff = argmin_reg_loss<double>(res._h,
 					res._g - _intercept*res._h, 0, 1e-6) - _intercept;
 		//qlog_warning("intercept:%le diff:%le\n",_intercept, diff);
-		if(fabs(diff)< std::max(_param.update_thres,
+		if(fabs(diff) < std::max(_param.update_thres,
 					_param.update_precs*fabs(_intercept)))
 			return false;
 		diff *= _param.eta;
@@ -323,6 +324,7 @@ public:
 				best.cut = 0.5*(last_entry->_val + this_entry->_val);
 				best.gain = gain;
 				//NOTE: this is not shrinked by _param.eta
+				//And indeed not used.
 				best.pred_R = argmin_reg_loss<double>(accum._h,
 					accum._g - node._pred*accum._h, l2reg, l1reg);
 				best.pred_L = argmin_reg_loss<double>(total._h-accum._h,
@@ -397,7 +399,20 @@ public:
 				qlog_info("after update: loss():%le\n",loss_after);
 				qlog_warning("Loss increased!\n");
 				qlog_info("approx_loss_diff: %le\n",approx_loss_diff);
-				qlog_info("old: %le new: %le diff: %le\n",node._pred-diff,node._pred,diff);
+				qlog_info("node._pred: old: %le new: %le diff: %le\n",
+						node._pred-diff,node._pred,diff);
+				qlog_info("node._sum_h: %le, sum_g: %le\n", node._sum_h, node._sum_g);
+				double modi_sum_g = node._sum_g - (node._pred-diff)*node._sum_h;
+				qlog_info("node._sum_g - node._pred*node._sum_h: %le\n",modi_sum_g);
+				qlog_info("min_reg_loss: %le\n",min_reg_loss<double>(node._sum_h,
+							modi_sum_g, _param.l2reg, _param.l1reg));
+				qlog_info("reg_loss: %le\n",reg_loss<double>(node._sum_h,
+							modi_sum_g, _param.l2reg, _param.l1reg, node._pred));
+				double argmin_x = argmin_reg_loss<double>(node._sum_h,
+							modi_sum_g, _param.l2reg, _param.l1reg);
+				qlog_info("argmin_reg_loss: %le\n",argmin_x);
+				qlog_info("reg_loss(argmin): %le\n",reg_loss<double>(node._sum_h,
+							modi_sum_g, _param.l2reg, _param.l1reg, argmin_x));
 				node.dbginfo();
 				tree.print();
 				char c;
@@ -407,6 +422,7 @@ public:
 				if(true) { //reverse direction
 					qlog_info("Dump to 'tmp'\n");
 					FILE * f=fopen("tmp","w");
+					fprintf(f,"y,gradient,hessien,weight,f\n");
 					for(size_t i=0;i<_stats.size();i++)
 						fprintf(f,"%le,%le,%le,%le,%le\n",
 								_y[i],_stats[i]._g,_stats[i]._h,_stats[i]._w,_f[i]);
@@ -463,7 +479,6 @@ public:
 			CHECK_F();
 			CHECK_LOSS();
 			}
-
 			if(not updated)
 				break;
 		}
@@ -594,6 +609,9 @@ public:
 			CHECK_LOSS();
 			split(candidates[0]);
 			//CHECK_LOSS(); This will increase a little due to regularization
+			//TODO: this update_tree_pred_and_f can be omitted,
+			//by using cut.pred_L and pred_R instead of recomputing it.
+			//Note that when node._pred is changed, _f should be changed as well.
 			update_tree_pred_and_f(candidates[0].tree_id);
 			update_stats();
 			CHECK_LOSS();

@@ -39,8 +39,8 @@ void DataSheet<FeaType>::from_libsvm(const char * file_name,
 		++nr;
 		const char * head = line.c_str();
 		out_y.push_back(qstrtod(head,nullptr)>0?1:0);
-		for(const char * head = qnextok(line.c_str());
-				head != line.c_str()+line.size(); head = qnextok(head)) {
+		for(const char * head = qlib::svm::next(line.c_str());
+				head != nullptr; head = qlib::svm::next(head)) {
 			const char * q = strchr(head,':');
 			if(not q) {
 				qlog_warning("Wrong token at %s\n",head);

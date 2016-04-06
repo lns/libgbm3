@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <string>
+#include <cmath>
 #include "qstdlib.hpp"
 
 /**

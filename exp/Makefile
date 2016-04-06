@@ -4,11 +4,11 @@ PROJ_ROOT=..
 #CXX=clang-omp++
 CXX=g++
 CXXFLAGS=-std=c++11 -O2 -Wall
-INCLUDES=-I${PROJ_ROOT}/src
+INCLUDES=-I${PROJ_ROOT}/src -I${PROJ_ROOT}/include
 # Linux
 #LDFLAGS= -ldw
 # Mac
-LDFLAGS=
+LDFLAGS=-lpthread
 
 TARGETS=demo
 

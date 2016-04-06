@@ -35,11 +35,14 @@ int main(int argc, char* argv[]) {
 	param.min_node_weight = 10.0f;
 	param.cut_thres = 1e-6;
 	//
+	const char * filename = "/dev/stdin";
+	if(argc>1)
+		filename = argv[1];
 	if(true) { // Training
 		GBM<FeaType> gbm(param);
 		gbm._obj = new LogLoss<double>();
 		//gbm.read_data_from_libsvm("../data/fsg/test.10k.txt");
-		gbm.read_data_from_libsvm("../data/SCS/train.svm");
+		gbm.read_data_from_libsvm(filename);
 		//gbm.read_data_from_libsvm("heart_scale.txt");
 		gbm.assign_weights(false); // balance positive/negitive sample
 		gbm.boost();
