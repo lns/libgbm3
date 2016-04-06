@@ -162,12 +162,11 @@ public:
 			qlog_info("[%s] Done reading and sorting. Now merging ...\n",qstrtime());
 		}
 		if(true) { // Merge
-			// Merge two sorted vector to the left one.
 			auto func = [&](int thread_id, int stride) {
+				ThreadEnv& te = thread_env[thread_id];
 				if(thread_id % (2*stride) == 0 and thread_id+stride < n_threads) {
-					// Merge thread_id and thread_id+stride
-					ThreadEnv& te = thread_env[thread_id];
 					ThreadEnv& te2 = thread_env[thread_id+stride];
+					// Merge thread_id and thread_id+stride
 					// Merge y
 					merge_to_left(*te.y, *te2.y,
 							[](const std::pair<long,T>& a, const std::pair<long,T>& b) -> bool {
@@ -182,6 +181,8 @@ public:
 						}
 					}
 				}
+				qlog_info("stride: %d, thread:%d, ft.size(): %ld\n",
+						stride, thread_id, te.ft->size());
 			};
 			for(int stride=1; stride<n_threads; stride*=2) {
 				for(int i=0;i<n_threads;i++) {
@@ -193,9 +194,14 @@ public:
 				}
 			}
 			// copy y
+			// todo: parallel sort
+			std::sort(thread_env[0].y->begin(), thread_env[0].y->end(),
+					[](const std::pair<long,T>& a, const std::pair<long,T>& b) -> bool {
+					return a.first < b.first; });
 			out_y.resize(thread_env[0].y->size());
-			for(size_t i=0;i<thread_env[0].y->size();i++)
+			for(size_t i=0;i<thread_env[0].y->size();i++) {
 				out_y[i] = (*thread_env[0].y)[i].second;
+			}
 			delete thread_env[0].y;
 			for(int i=1;i<n_threads;i++) { // omit thread_env[0]
 				delete thread_env[i].ft;
