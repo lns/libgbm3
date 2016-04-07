@@ -12,6 +12,7 @@ public:
 	double inner_precs; // stop precision in inner loop
 	double outer_thres; // stop threshold in outer loop
 	double outer_precs; // stop precision in outer loop
+	double proximal_l2; // l2 coefficient for proximal gradient
 	float cut_thres; // threshold for difference of feature value for a cut
 	double min_node_weight;
 	unsigned max_tree_node; // max number of nodes in a tree

@@ -8,6 +8,7 @@ int main(int argc, char* argv[]) {
 	param.eta = 1.0f;
 	param.l1reg = 1.0f;
 	param.l2reg = 1.0f;
+	param.proximal_l2 = 0.1f;
 	// Max number of nodes in a tree
 	param.max_tree_node = 24;
 	// Number of recent tree to search
@@ -31,7 +32,7 @@ int main(int argc, char* argv[]) {
 	param.outer_thres = 1e-7;
 	param.outer_precs = 1e-4;
 	//
-	param.max_inner_iter = 0;
+	param.max_inner_iter = 1;
 	param.min_node_weight = 10.0f;
 	param.cut_thres = 1e-6;
 	//
