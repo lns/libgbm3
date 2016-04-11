@@ -87,24 +87,37 @@ public:
 	std::mt19937 _rand_gen;
 	//
 	const Parameters& _param;
+	// Objective
 	const Objective<double>* _obj;
+	// Training file FeaTable
 	const FeaTable<FeaType>* _ft;
+	// Training file targets
 	const std::vector<double>* _y;
 
 	/**
+	 * f is tree output
 	 * g is weight-adjusted gradient
 	 * h is weight-adjusted hessian
 	 * w is weight, with mean = 1
 	 * (this is the weight used for training, and is not directly provided by data.)
 	 */
-	std::vector<Stats> _stats;
 	// raw f
 	std::vector<double> _f;
+	// g, h, and w
+	std::vector<Stats> _stats;
 	// raw loss
 	std::vector<double> _loss;
 	// sample weight (provided by data, may not equal to _stats._w)
 	// (i.e. sample-weight-weighted-loss is the optimization target)
 	std::vector<double> _sample_weight;
+	
+	/**
+	 * For evaluation on test set
+	 */
+	const FeaTable<FeaType>* _test_ft;
+	const std::vector<double>* _test_y;
+	std::vector<double> _test_f;
+	std::vector<double> _test_loss;
 
 	/**
 	 * Model
@@ -115,12 +128,14 @@ public:
 	std::vector<NodeIndex> _vec_ni;
 
 	GBM(const Parameters& param) : _rand_dev(), _rand_gen(_rand_dev()),
-		_param(param), _obj(nullptr) {
-			if(_param.objective=="LogLoss")
-				_obj = new LogLoss<double>();
-			else
-				qlog_warning("Unknown objective:'%s'\n",_param.objective.c_str());
-		}
+		_param(param), _obj(nullptr), _ft(nullptr), _y(nullptr),
+		_test_ft(nullptr), _test_y(nullptr)
+	{
+		if(_param.objective=="LogLoss")
+			_obj = new LogLoss<double>();
+		else
+			qlog_warning("Unknown objective:'%s'\n",_param.objective.c_str());
+	}
 
 	~GBM() {
 		if(_obj)
@@ -143,6 +158,13 @@ public:
 	 */
 	inline void set_train_data(const FeaTable<FeaType>& ft,
 		const std::vector<double>& y);
+
+	/**
+	 * Set test data
+	 */
+	inline void set_test_data(const FeaTable<FeaType>& ft,
+		const std::vector<double>& y);
+
 	/**
 	 * Add a new tree with root node.
 	 * And update tree sum_g,h, node._pred and f
@@ -169,7 +191,7 @@ public:
 	/**
 	 * Get loss, based on _y and _f (and _pred in _forest for reg)
 	 */
-	inline double loss(bool including_reg = true);
+	inline double loss(bool including_reg = true) const;
 
 	/**
 	 * update the intercept (one newton step), according to _stats._g _h
@@ -196,6 +218,26 @@ public:
 	 * @return whether f is altered (which means beta is also altered)
 	 */
 	inline bool update_tree_pred_and_f(int tree_id);
+
+	/**
+	 * Get train set AUC
+	 */
+	inline double get_auc() const;
+
+	/**
+	 * Update test f
+	 */
+	inline void update_test_f();
+
+	/**
+	 * Get test loss
+	 */
+	inline double get_test_loss() const;
+
+	/**
+	 * Get test AUC
+	 */
+	inline double get_test_auc() const;
 
 	/**
 	 * Refine weight (fully corrective update)
@@ -241,5 +283,4 @@ public:
 };
 
 #include "GBM-imp.hpp"
-
 

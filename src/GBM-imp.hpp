@@ -11,6 +11,7 @@
 #include "qstdlib.hpp" // qlib::to_string
 #include "qrand.hpp" // qlib::drand
 #include "util.hpp"
+#include "auc.hpp"
 
 #if 0
 #define CHECK_F() do{ if(not check_f()) {_forest.print(); qlog_error("check_f() failed.\n");}} while(false)
@@ -32,8 +33,18 @@ inline void GBM<FeaType>::set_train_data(const FeaTable<FeaType>& ft,
 	_y = &y;
 	_stats.resize(_y->size());
 	_f.resize(_y->size());
-	_loss.resize(_y->size());
 	_sample_weight.resize(_y->size(),1.0f);
+}
+
+/**
+ * Set test data
+ */
+template<typename FeaType>
+inline void GBM<FeaType>::set_test_data(const FeaTable<FeaType>& ft,
+		const std::vector<double>& y) {
+	_test_ft = &ft;
+	_test_y = &y;
+	_test_f.resize(_test_y->size());
 }
 
 /**
@@ -125,11 +136,13 @@ inline Stats GBM<FeaType>::sum_stats() const {
  * Get loss, based on _y and _f (and _pred in _forest for reg)
  */
 template<typename FeaType>
-inline double GBM<FeaType>::loss(bool including_reg) {
+inline double GBM<FeaType>::loss(bool including_reg) const {
 	double res = 0;
-	_obj->Loss(_y->data(), 1, &_f[0], 1, _y->size(), &_loss[0], 1);
-	for(size_t i=0;i<_loss.size();++i)
-		res += _loss[i]*_stats[i]._w; // weighted with _w
+	static std::vector<double> loss_vec;
+	loss_vec.resize(_y->size());
+	_obj->Loss(_y->data(), 1, &_f[0], 1, _y->size(), &loss_vec[0], 1);
+	for(size_t i=0;i<loss_vec.size();++i)
+		res += loss_vec[i]*_stats[i]._w; // weighted with _w
 	if(including_reg)
 		for(const auto& tree : _forest)
 			for(const auto& node : tree)
@@ -432,9 +445,6 @@ inline void GBM<FeaType>::split(const Cut<FeaType>& cut) {
 template<typename FeaType>
 inline void GBM<FeaType>::boost() {
 	refine(_param.max_inner_iter);
-	CHECK_LOSS();
-	CHECK_STATS();
-	CHECK_F();
 	for(size_t iter=0; ; iter++) {
 		size_t n_leaves = 0;
 		for(const auto& tree : _forest)
@@ -448,18 +458,10 @@ inline void GBM<FeaType>::boost() {
 		}
 		if(_forest.empty() or (_forest.back().size()>1 
 					and _forest.size() <= _param.max_trees)) {
-			printf("Add a new tree.\n");
-			CHECK_LOSS();
-			CHECK_F();
-			CHECK_STATS();
+			qlog_info("Add a new tree.\n");
 			if(add_new_tree()) // f maybe altered
 				update_stats();
-			CHECK_STATS();
-			CHECK_LOSS();
 			refine(_param.max_inner_iter);
-			CHECK_LOSS();
-			CHECK_STATS();
-			CHECK_F();
 			continue;
 		}
 		std::vector<Task> tasks;
@@ -478,15 +480,12 @@ inline void GBM<FeaType>::boost() {
 			break;
 		}
 		std::vector<Cut<FeaType>> candidates(tasks.size(), Cut<FeaType>());
-		CHECK_STATS();
 		//#pragma omp parallel for
 		for(size_t i=0; i<tasks.size(); i++) {
 			candidates[i] = find_best_fea(tasks[i].tree_id, tasks[i].node_id, tasks[i].l2reg, tasks[i].l1reg);
 		}
 		std::sort(candidates.begin(), candidates.end(), CutComp<FeaType>());
 		const double last_loss = _recent_loss;
-		printf("iter: %4zu, reg_loss: %le, loss: %le\n", iter,
-				_recent_loss, loss(false));
 		if(candidates[0].gain < _param.relative_tol * _recent_loss) {
 			qlog_info("[%s] candidate's gain meets stop criteria: %g < %g. Stop.\n",
 					qstrtime(), candidates[0].gain, _param.relative_tol*_recent_loss);
@@ -498,29 +497,31 @@ inline void GBM<FeaType>::boost() {
 			break;
 		}
 		// Use the cut found to split
-		printf("best candidates gain: %le (approx.)\n",candidates[0].gain);
-		CHECK_LOSS();
-		CHECK_STATS();
+		qlog_info("best candidates gain: %le (approx.)\n",candidates[0].gain);
 		split(candidates[0]);
-		CHECK_STATS();
-		CHECK_F();
 		//CHECK_LOSS(); This will increase a little due to regularization
 		//TODO: this update_tree_pred_and_f can be omitted,
 		//by using cut.pred_L and pred_R instead of recomputing it.
 		//Note that when node._pred is changed, _f should be changed as well.
 		update_tree_pred_and_f(candidates[0].tree_id);
 		update_stats();
-		CHECK_STATS();
-		CHECK_LOSS();
 		refine(_param.max_inner_iter);
-		printf("      +node reg_loss: %le, loss: %le\n", _recent_loss, loss(false));
+		//printf("      +node reg_loss: %le, loss: %le\n", _recent_loss, loss(false));
 		if(last_loss - _recent_loss < _param.relative_tol * _recent_loss) {
 			qlog_info("[%s] Loss reduction meets stop criteria. Stop.\n",qstrtime());
 			break;
 		}
-		CHECK_LOSS();
-		CHECK_STATS();
+		// update prediction on test set
+		update_test_f();
+		printf("\r%4zu %12le %12le %8lf %12le %8lf %5ld %5ld\n"
+				"iter trn-reg-loss   trn-loss    trn-auc   tst-loss    tst-auc #tree #leaf",
+				iter, _recent_loss, loss(false)/_y->size(), get_auc(),
+				get_test_loss()/_test_y->size(), get_test_auc(),
+				_forest.size(), n_leaves);
+		fflush(stdout);
 	}
+	printf("\n");
+	fflush(stdout);
 }
 
 /**
@@ -545,13 +546,62 @@ inline void GBM<FeaType>::save_to_file(const char * file_name) const {
 	Forest<FeaType> Woods = output_model();
 	FILE * f = fopen(file_name, "w");
 	//todo: print eval result on test
-	//
 	//1. print parameters
 	_param.opr->set_file(f);
 	_param.opr->print_file();
 	//2. print model
 	Woods.print(f);
 	fclose(f);
+}
+
+/**
+ * Update test f
+ */
+template<typename FeaType>
+inline void GBM<FeaType>::update_test_f() {
+	if(not _test_ft or not _test_y)
+		return;
+	_test_f.resize(_test_y->size());
+	for(auto&& x: _test_f)
+		x = _intercept;
+	for(const auto& tree : _forest)
+		tree.predict(*_test_ft, _test_f);
+}
+
+/**
+ * Get test set loss
+ * Should be called after update_test_f()
+ */
+template<typename FeaType>
+inline double GBM<FeaType>::get_test_loss() const {
+	if(not _test_ft or not _test_y)
+		return std::nan("");
+	static std::vector<double> test_loss;
+	test_loss.resize(_test_y->size());
+	_obj->Loss(_test_y->data(),1, &_test_f[0],1, _test_y->size(), &test_loss[0],1);	
+	double res = 0;
+	for(size_t i=0;i<test_loss.size();++i)
+		res += test_loss[i];
+	return res;
+}
+
+/**
+ * Get train set auc based on _f
+ */
+template<typename FeaType>
+inline double GBM<FeaType>::get_auc() const {
+	return calc_auc(_y->data(), _f.data(), _f.size());
+}
+
+/**
+ * Get test set auc
+ * Should be called after update_test_f()
+ */
+template<typename FeaType>
+inline double GBM<FeaType>::get_test_auc() const {
+	if(not _test_ft or not _test_y)
+		return std::nan("");
+	return calc_auc(_test_y->data(), _test_f.data(), _test_f.size());
 }
 
 /**

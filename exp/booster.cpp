@@ -35,12 +35,17 @@ int main(int argc, char* argv[]) {
 		fprintf(stderr, "Options:\n");
 		opr.print_value();
 	}
-	FeaTable<FeaType> ft;
-	std::vector<double> y;
+	FeaTable<FeaType> train_ft, test_ft;
+	std::vector<double> train_y, test_y;
 	GBM<FeaType> gbm(param);
-	ft.from_libsvm_mp(param.train_file_path.c_str(), y);
-	ft.sort();
-	gbm.set_train_data(ft, y);
+	train_ft.from_libsvm_mp(param.train_file_path.c_str(), train_y);
+	train_ft.sort();
+	gbm.set_train_data(train_ft, train_y);
+	if(param.test_file_path!="") {
+		test_ft.from_libsvm_mp(param.test_file_path.c_str(), test_y);
+		test_ft.sort();
+		gbm.set_test_data(test_ft, test_y);
+	}
 	gbm.assign_weights(false); // todo: add to parameters
 	gbm.boost();
 	gbm.save_to_file(param.out_model_path.c_str());
