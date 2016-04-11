@@ -5,7 +5,7 @@
 int main(int argc, char* argv[]) {
 	typedef std::string FeaType;
 	Parameters param;
-	qlib::OptParser<Parameters> opr(param);	
+	qlib::OptParser<Parameters> opr(param);
 	param.opr = &opr;
 	if(argc==1) {
 		fprintf(stderr,
@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
 		return -1;
 	else {
 		fprintf(stderr, "Options:\n");
-		opr.print_value();	
+		opr.print_value();
 	}
 	FeaTable<FeaType> ft;
 	std::vector<double> y;

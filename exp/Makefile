@@ -10,11 +10,11 @@ INCLUDES=-I${PROJ_ROOT}/src -I${PROJ_ROOT}/include
 # Mac
 LDFLAGS=-lpthread
 
-TARGETS=demo
+TARGETS=booster
 
 all: $(TARGETS)
 
-demo: demo.cpp ${PROJ_ROOT}/src/*
+booster: booster.cpp ${PROJ_ROOT}/src/*
 	$(CXX) $(CXXFLAGS) -o $@ $(INCLUDES) $< $(LDFLAGS)
 
 DATA=../data/SCS/train.svm
