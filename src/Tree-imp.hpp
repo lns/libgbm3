@@ -46,9 +46,9 @@ void Node<F>::print(FILE * fo) const {
 	for(int i=0;i<_depth;i++)
 		fprintf(fo,"\t");
 	if(is_leaf())
-		fprintf(fo,"%d:leaf=%.8le\n", _self, _pred);
+		fprintf(fo,"%d:leaf=%g\n", _self, _pred);
 	else if(is_branch())
-		fprintf(fo,"%d:[%s<%le] yes=%d,no=%d,missing=%d\n",
+		fprintf(fo,"%d:[%s<%g] yes=%d,no=%d,missing=%d\n",
 				_self, qlib::to_string(_fea).c_str(), _cut, _left, _right,
 				_miss_go_left ? _left : _right);
 	else {
