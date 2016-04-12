@@ -179,14 +179,20 @@ void Tree<F>::predict(const FeaTable<F>& ft,
 			}
 		}
 		if(node.is_branch()) {
-			const auto& fea_vec = ft.find(node._fea)->second;
-			for(auto&&entry : fea_vec) {
-				if(ni[entry._row]!=node._self)
-					continue;
-				if(entry._val < node._cut)
-					ni[entry._row] = node._left;
-				else
-					ni[entry._row] = node._right;
+			auto it = ft.find(node._fea);
+			if(it!=ft.end()) {
+				const auto& fea_vec = it->second;
+				for(auto&&entry : fea_vec) {
+					if(ni[entry._row]!=node._self)
+						continue;
+					if(entry._val < node._cut)
+						ni[entry._row] = node._left;
+					else
+						ni[entry._row] = node._right;
+				}
+			} else { // feature not found
+				qlog_warning("Feature '%s' not found.\n",qlib::to_string(node._fea).c_str());
+				node.dbginfo();
 			}
 			int miss = node._miss_go_left ? node._left : node._right;
 			for(auto&x: ni)

@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
 	std::vector<double> train_y, test_y;
 	GBM<FeaType> gbm(param);
 	train_ft.from_libsvm_mp(param.train_file_path.c_str(), train_y);
-	train_ft.sort();
+	//train_ft.sort();
 	gbm.set_train_data(train_ft, train_y);
 	if(param.test_file_path!="") {
 		test_ft.from_libsvm_mp(param.test_file_path.c_str(), test_y);

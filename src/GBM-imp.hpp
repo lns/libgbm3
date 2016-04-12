@@ -507,7 +507,8 @@ inline void GBM<FeaType>::boost() {
 		update_stats();
 		refine(_param.max_inner_iter);
 		//printf("      +node reg_loss: %le, loss: %le\n", _recent_loss, loss(false));
-		if(last_loss - _recent_loss < _param.relative_tol * _recent_loss) {
+		if(_param.check_loss and 
+				last_loss - _recent_loss < _param.relative_tol * _recent_loss) {
 			qlog_info("[%s] Loss reduction meets stop criteria. Stop.\n",qstrtime());
 			break;
 		}

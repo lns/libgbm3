@@ -17,6 +17,8 @@ public:
 	FTEntry(uint32_t r, float v): _row(r), _val(v) {}
 };
 
+#define SORT 1
+
 /**
  * Merge two sorted vectors. Save results to the left one.
  */
@@ -146,7 +148,7 @@ public:
 				free(buf);
 				// sort
 #if SORT
-				for(const auto& it : (*te.ft)) {
+				for(auto&& it : (*te.ft)) {
 					std::sort(it.second.begin(), it.second.end(), Comp());
 				}
 #endif
@@ -181,8 +183,8 @@ public:
 						}
 					}
 				}
-				qlog_info("stride: %d, thread:%d, ft.size(): %ld\n",
-						stride, thread_id, te.ft->size());
+				//qlog_info("stride: %d, thread:%d, ft.size(): %ld\n",
+				//		stride, thread_id, te.ft->size());
 			};
 			for(int stride=1; stride<n_threads; stride*=2) {
 				for(int i=0;i<n_threads;i++) {
