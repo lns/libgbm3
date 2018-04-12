@@ -8,8 +8,7 @@
 #include <vector>
 #include <fstream>
 #include "qlog.hpp"
-#include "cpu_timer.hpp"
-#include "qstdlib.hpp"
+#include "qtime.hpp"
 #include "util.hpp"
 
 // ds[row][fea] = val
@@ -32,13 +31,13 @@ void DataSheet<FeaType>::from_libsvm(const char * file_name,
 	std::ifstream ifs(file_name);
 	std::string line;
 	long nr = 0, nz = 0;
-	qlog_info("[%s] Reading %s ...\n",qstrtime(),file_name);
+	qlog_info("Reading %s ...\n",file_name);
 	while(getline(ifs,line)) {
 		this->push_back(std::unordered_map<FeaType, float>());
 		auto& sample = (*this)[this->size()-1];
 		++nr;
 		const char * head = line.c_str();
-		out_y.push_back(qstrtod(head,nullptr)>0?1:0);
+		out_y.push_back(strtod(head,nullptr)>0?1:0);
 		for(const char * head = qlib::svm::next(line.c_str());
 				head != nullptr; head = qlib::svm::next(head)) {
 			const char * q = strchr(head,':');
@@ -47,11 +46,11 @@ void DataSheet<FeaType>::from_libsvm(const char * file_name,
 				continue;
 			}
 			FeaType fea = parse_cstr<FeaType>(head,q);
-			float val = qstrtod(q+1,nullptr);
+			float val = strtod(q+1,nullptr);
 			sample[fea] = val;
 			++nz;
 		}
 	}
-	qlog_info("[%s] Done. nr: %ld, nz: %ld\n",qstrtime(),nr,nz);
+	qlog_info("Done. nr: %ld, nz: %ld\n",nr,nz);
 }
 

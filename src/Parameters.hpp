@@ -40,7 +40,7 @@ public:
 		O(in_model_path,"Path of input model","");
 		O(out_model_path,"Path of output model","model.conf");
 		O(out_conf_path,"Path of output conf","");
-		O(objective,"Objective (only 'LogLoss' is currently supported)","LogLoss");
+		O(objective,"Objective ('LogLoss' or 'L2Loss')","LogLoss");
 		O(l1reg,"L1 regularization coefficient",1e-6);
 		O(l2reg,"L2 regularization coefficient",1e-6);
 		O(proximal_l2,"L2 Proximal coefficient for Newton-method",0.25);

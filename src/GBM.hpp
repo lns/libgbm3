@@ -133,6 +133,8 @@ public:
 	{
 		if(_param.objective=="LogLoss")
 			_obj = new LogLoss<double>();
+		else if(_param.objective=="L2Loss")
+			_obj = new L2Loss<double>();
 		else
 			qlog_warning("Unknown objective:'%s'\n",_param.objective.c_str());
 	}

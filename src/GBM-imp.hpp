@@ -187,7 +187,7 @@ template<typename FeaType>
 Cut<FeaType> GBM<FeaType>::find_best_fea(int tree_id, NodeIdType node_id,
 		double l2reg, double l1reg) const {
 	//qlog_info("[%s] find_best_fea() for forest[%d][%d] ...\n",
-	//		qstrtime(),tree_id,node_id);
+	//		qlib::timestr().c_str(),tree_id,node_id);
 	const Tree<FeaType>& tree = _forest[tree_id];
 	const NodeIndex& ni = _vec_ni[tree_id];
 	CHECK_STATS();
@@ -206,7 +206,7 @@ Cut<FeaType> GBM<FeaType>::find_best_fea(int tree_id, NodeIdType node_id,
 	for(const auto& c: cuts)
 		if(c.gain > best.gain)
 			best = c;
-	//qlog_info("[%s] best_fea found:\n",qstrtime());
+	//qlog_info("[%s] best_fea found:\n",qlib::timestr().c_str());
 	best.tree_id = tree_id;
 	best.node_id = node_id;
 	//best.print();
@@ -352,7 +352,7 @@ inline bool GBM<FeaType>::update_tree_pred_and_f(int tree_id) {
  */
 template<typename FeaType>
 inline int GBM<FeaType>::refine(int max_iter) {
-	qlog_info("[%s] Refine: loss():%le\n",qstrtime(),loss());
+	qlog_info("[%s] Refine: loss():%le\n",qlib::timestr().c_str(),loss());
 	CHECK_F();
 	update_stats();
 	_recent_loss = loss(true);
@@ -378,7 +378,7 @@ inline int GBM<FeaType>::refine(int max_iter) {
 		if(not updated)
 			break;
 	}
-	qlog_info("[%s] Done refine[%d]: loss():%le\n",qstrtime(),iter,loss());
+	qlog_info("[%s] Done refine[%d]: loss():%le\n",qlib::timestr().c_str(),iter,loss());
 	return iter;
 }
 
@@ -453,7 +453,7 @@ inline void GBM<FeaType>::boost() {
 					n_leaves ++;
 		if(n_leaves>=_param.max_leaves) {
 			qlog_info("[%s] max_leaves=%u reached. Stop.\n",
-					qstrtime(),_param.max_leaves);
+					qlib::timestr().c_str(),_param.max_leaves);
 			break;
 		}
 		if(_forest.empty() or (_forest.back().size()>1 
@@ -476,7 +476,7 @@ inline void GBM<FeaType>::boost() {
 			}
 		}
 		if(tasks.empty()) {
-			qlog_info("[%s] No split candidates. Stop.\n",qstrtime());
+			qlog_info("[%s] No split candidates. Stop.\n",qlib::timestr().c_str());
 			break;
 		}
 		std::vector<Cut<FeaType>> candidates(tasks.size(), Cut<FeaType>());
@@ -488,7 +488,7 @@ inline void GBM<FeaType>::boost() {
 		const double last_loss = _recent_loss;
 		if(candidates[0].gain < _param.relative_tol * _recent_loss) {
 			qlog_info("[%s] candidate's gain meets stop criteria: %g < %g. Stop.\n",
-					qstrtime(), candidates[0].gain, _param.relative_tol*_recent_loss);
+					qlib::timestr().c_str(), candidates[0].gain, _param.relative_tol*_recent_loss);
 			break;
 		}
 		if(_ft->find(candidates[0].fea)==_ft->end()) {
@@ -509,7 +509,7 @@ inline void GBM<FeaType>::boost() {
 		//printf("      +node reg_loss: %le, loss: %le\n", _recent_loss, loss(false));
 		if(_param.check_loss and 
 				last_loss - _recent_loss < _param.relative_tol * _recent_loss) {
-			qlog_info("[%s] Loss reduction meets stop criteria. Stop.\n",qstrtime());
+			qlog_info("[%s] Loss reduction meets stop criteria. Stop.\n",qlib::timestr().c_str());
 			break;
 		}
 		// update prediction on test set
@@ -517,7 +517,7 @@ inline void GBM<FeaType>::boost() {
 		printf("\r%4zu %12le %12le %8lf %12le %8lf %5ld %5ld\n"
 				"iter trn-reg-loss   trn-loss    trn-auc   tst-loss    tst-auc #tree #leaf",
 				iter, _recent_loss, loss(false)/_y->size(), get_auc(),
-				get_test_loss()/_test_y->size(), get_test_auc(),
+				get_test_loss()/(_test_y?_test_y->size():1), get_test_auc(),
 				_forest.size(), n_leaves);
 		fflush(stdout);
 	}

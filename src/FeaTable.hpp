@@ -5,7 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include "qlog.hpp"
-#include "cpu_timer.hpp"
+#include "qtime.hpp"
 #include "DataSheet.hpp"
 #include "MP_FileReader.hpp"
 
@@ -55,22 +55,22 @@ public:
 		std::vector<std::vector<FTEntry>*> tasks;
 		for(auto& it: (*this))
 			tasks.push_back(&it.second);
-		qlog_info("[%s] Sorting ...\n",qstrtime());
+		qlog_info("Sorting ...\n");
 		#pragma omp parallel for
 		for(size_t i=0;i<tasks.size();i++)
 			std::sort(tasks[i]->begin(), tasks[i]->end(), Comp());
-		qlog_info("[%s] Done.\n",qstrtime());
+		qlog_info("Done.\n");
 	}
 
 	// Read from a DataSheet
 	inline void from_datasheet(const DataSheet<FeaType>& ds) {
 		this->clear();
-		qlog_info("[%s] Reading from datasheet ...\n",qstrtime());
+		qlog_info("Reading from datasheet ...\n");
 		for(size_t i=0; i<ds.size(); i++)
 			for(auto&x: ds[i]) {
 				(*this)[x.first].push_back(FTEntry(i,x.second));
 			}
-		qlog_info("[%s] Done.\n",qstrtime());
+		qlog_info("Done.\n");
 	}
 
 	// Read from a libsvm text file
@@ -78,7 +78,7 @@ public:
 	inline void from_libsvm(const char * file_name, std::vector<T>& out_y) {
 		this->clear();
 		out_y.clear();
-		qlog_info("[%s] Reading from libsvm file '%s' ...\n",qstrtime(),file_name);
+		qlog_info("Reading from libsvm file '%s' ...\n",file_name);
 		std::ifstream ifs(file_name);
 		std::string line;
 		size_t r = 0;
@@ -97,7 +97,7 @@ public:
 			}
 			++r;
 		}
-		qlog_info("[%s] Done. nr: %ld, nc: %ld\n",qstrtime(),r,this->size());
+		qlog_info("Done. nr: %ld, nc: %ld\n",r,this->size());
 	}
 
 	// [MP] Read from a libsvm text file
@@ -153,7 +153,7 @@ public:
 				}
 #endif
 			};
-			qlog_info("[%s] Reading from libsvm file '%s' ...\n",qstrtime(),file_name);
+			qlog_info("[%s] Reading from libsvm file '%s' ...\n",qlib::timestr().c_str(),file_name);
 			for(int i=0;i<n_threads;i++) {
 				thread_env[i].th = new std::thread(func, i);
 			}
@@ -161,7 +161,7 @@ public:
 				thread_env[i].th->join();
 				delete thread_env[i].th;
 			}
-			qlog_info("[%s] Done reading and sorting. Now merging ...\n",qstrtime());
+			qlog_info("[%s] Done reading and sorting. Now merging ...\n",qlib::timestr().c_str());
 		}
 		if(true) { // Merge
 			auto func = [&](int thread_id, int stride) {
@@ -209,7 +209,7 @@ public:
 				delete thread_env[i].ft;
 				delete thread_env[i].y;
 			}
-			qlog_info("[%s] Done merging. nr: %ld, nc: %ld\n",qstrtime(),
+			qlog_info("[%s] Done merging. nr: %ld, nc: %ld\n",qlib::timestr().c_str(),
 					out_y.size(), this->size());
 		}
 	}

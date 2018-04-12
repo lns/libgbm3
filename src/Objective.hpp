@@ -46,3 +46,27 @@ public:
 	~LogLoss() {}
 };
 
+template <typename T>
+class L2Loss : public Objective<T> {
+public:
+	void Loss(const T* y, int yinc, const T* f, int finc, size_t n,
+			T* res, int resinc) const override {
+		#pragma omp parallel for
+		for(size_t i=0;i<n;i++)
+			res[i*resinc] = (y[i*yinc]-f[i*finc])*(y[i*yinc]-f[i*finc]);
+	}
+	void FirstOrder(const T* y, int yinc, const T* f, int finc, size_t n,
+			T* res, int resinc) const override {
+		#pragma omp parallel for
+		for(size_t i=0;i<n;i++)
+			res[i*resinc] = 2*(y[i*yinc]-f[i*finc]);
+	}
+	void SecondOrder(const T* y, int yinc, const T* f, int finc, size_t n,
+			T* res, int resinc) const override {
+		#pragma omp parallel for
+		for(size_t i=0;i<n;i++)
+			res[i*resinc] = 2;
+	}
+	~L2Loss() {}
+};
+

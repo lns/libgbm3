@@ -30,7 +30,7 @@ inline T soft_thres(T x, T thres) {
  * L(x) L= 0.5*a*x^2 + b*x + 0.5*l2reg*x^2 + l1reg*fabs(x)
  * 
  * Solution is:
- * 	x_min = soft_thres(b, l1reg)/(a+l2reg)
+ * 	x_min = soft_thres(-b, l1reg)/(a+l2reg)
  *
  * (The implementation is inspired from Tong Zhang's code.)
  */
